@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "qwen": {
+    "provider": "ollama",
+    "model": "qwen3:8b",
+    "license": "Apache-2.0"
+  },
+  "whisper": {
+    "repo": "Systran/faster-whisper-medium",
+    "revision": "7832330bcea9a8d5fd6d6637c49fe5d256e98277",
+    "license": "MIT",
+    "local_dir": "models/whisper-medium"
+  },
+  "chatterbox_api": {
+    "repo": "travisvn/chatterbox-tts-api",
+    "revision_policy": "resolve-main-at-install-and-record-sha",
+    "license": "AGPL-3.0",
+    "runtime_dir": "local_apps/chatterbox-tts-api"
+  },
+  "cogvideox": {
+    "repo": "zai-org/CogVideoX1.5-5B",
+    "revision": "5cb8a989ab3ca1223b04b42b01a5314cd3825f32",
+    "license": "CogVideoX LICENSE",
+    "approx_download_gb": 31.1,
+    "profile": {
+      "torch": "2.6.0+cu124",
+      "diffusers": "0.35.2",
+      "transformers": "4.57.6",
+      "accelerate": "1.14.0",
+      "torchao": "0.12.0",
+      "imageio": "2.37.4",
+      "imageio_ffmpeg": "0.6.0",
+      "hf_xet": "1.6.0"
+    }
+  }
+}
