@@ -1536,7 +1536,20 @@ def minimax_tts(text: str, voice_id: str, voice_rate: float, voice_file: str, vo
     for attempt in range(3):
         try:
             logger.info(f"start MiniMax TTS, model: {model}, voice: {voice_id}, try: {attempt + 1}")
-            response = requests.post(url, json=payload, headers=headers, timeout=120)
+            raw_timeout = config.chatterbox.get("request_timeout", 600)
+            try:
+                request_timeout = max(30.0, float(raw_timeout or 600))
+            except (TypeError, ValueError):
+                request_timeout = 600.0
+            logger.info(
+                f"chatterbox request chars={len(text)}, read_timeout={request_timeout:g}s"
+            )
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=(10, request_timeout),
+            )
             if response.status_code != 200:
                 logger.error(f"MiniMax TTS failed with status {response.status_code}: {response.text[:200]}")
                 continue
@@ -1680,6 +1693,24 @@ def chatterbox_tts(
         logger.error("Chatterbox TTS text is empty")
         return None
 
+    # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+    # MPT-LOCAL-AUTO-LABEL: Chatterbox readiness + UTF-8 sanitation
+    _local_auto_managed = False
+    _local_auto_runtime = None
+    try:
+        from app.services import local_auto_runtime as _local_auto_runtime
+        if _local_auto_runtime.is_enabled():
+            _local_auto_runtime.ensure_chatterbox_ready()
+            text = _local_auto_runtime.sanitize_spoken_text(text)
+            _local_auto_managed = True
+            if not text:
+                logger.error("Chatterbox TTS text contains no speakable characters")
+                return None
+    except Exception as exc:
+        logger.exception(f"Local Automatic could not prepare Chatterbox: {exc}")
+        return None
+    # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
+
     base_url = (config.chatterbox.get("base_url", "") or "").strip().rstrip("/")
     if not base_url:
         logger.error(
@@ -1732,6 +1763,11 @@ def chatterbox_tts(
 
             sub_maker = ensure_legacy_submaker_fields(SubMaker())
             logger.success(f"chatterbox tts succeeded: {voice_file}")
+            # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+            # MPT-LOCAL-AUTO-LABEL: Chatterbox automatic stop on success
+            if _local_auto_managed and _local_auto_runtime is not None:
+                _local_auto_runtime.stop_chatterbox()
+            # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
             return populate_legacy_submaker_with_full_text(
                 sub_maker=sub_maker,
                 text=text,
@@ -1740,6 +1776,11 @@ def chatterbox_tts(
         except Exception as e:
             logger.error(f"chatterbox tts failed: {str(e)}")
 
+    # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+    # MPT-LOCAL-AUTO-LABEL: Chatterbox automatic stop on failure
+    if _local_auto_managed and _local_auto_runtime is not None:
+        _local_auto_runtime.stop_chatterbox()
+    # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
     return None
 
 
@@ -2110,16 +2151,82 @@ def _build_subtitle_items_from_legacy_submaker(
     return sub_items
 
 
-def create_subtitle(sub_maker: SubMaker, text: str, subtitle_file: str):
+def _build_subtitle_items_from_edge_cues_words(sub_maker: SubMaker) -> list[str]:
+    """
+    Directly format edge_tts cues into single-word / cue-level SRT items.
+    """
+    formatter = _build_subtitle_formatter()
+    sub_items = []
+    sub_index = 0
+    for cue in sub_maker.cues:
+        cue_text = unescape(cue.content).strip()
+        if not cue_text:
+            continue
+        sub_index += 1
+        start_time = int(cue.start.total_seconds() * 10000000)
+        end_time = int(cue.end.total_seconds() * 10000000)
+        sub_items.append(
+            formatter(
+                idx=sub_index,
+                start_time=start_time,
+                end_time=end_time,
+                sub_text=cue_text,
+            )
+        )
+    return sub_items
+
+
+def _build_subtitle_items_from_legacy_submaker_words(sub_maker: SubMaker) -> list[str]:
+    """
+    Directly format legacy submaker into single-word SRT items.
+    """
+    formatter = _build_subtitle_formatter()
+    sub_items = []
+    sub_index = 0
+    legacy_offsets = getattr(sub_maker, "offset", [])
+    legacy_subs = getattr(sub_maker, "subs", [])
+    for offset, sub in zip(legacy_offsets, legacy_subs):
+        cue_text = unescape(sub).strip()
+        if not cue_text:
+            continue
+        sub_index += 1
+        start_time, end_time = offset
+        sub_items.append(
+            formatter(
+                idx=sub_index,
+                start_time=start_time,
+                end_time=end_time,
+                sub_text=cue_text,
+            )
+        )
+    return sub_items
+
+
+def create_subtitle(
+    sub_maker: SubMaker,
+    text: str,
+    subtitle_file: str,
+    word_level: bool = False,
+):
     """
     优化字幕文件
     1. 将字幕文件按照标点符号分割成多行
     2. 逐行匹配字幕文件中的文本
     3. 生成新的字幕文件
+    如果 word_level 为 True，直接输出逐词单条字幕。
     """
     text = _format_text(text)
-    script_lines = utils.split_string_by_punctuations(text)
     try:
+        if word_level:
+            if hasattr(sub_maker, "cues") and sub_maker.cues:
+                sub_items = _build_subtitle_items_from_edge_cues_words(sub_maker)
+            else:
+                sub_items = _build_subtitle_items_from_legacy_submaker_words(sub_maker)
+            if sub_items:
+                _write_subtitle_items(sub_items, subtitle_file)
+                return
+
+        script_lines = utils.split_string_by_punctuations(text)
         if hasattr(sub_maker, "cues") and sub_maker.cues:
             sub_items = _build_subtitle_items_from_edge_cues(sub_maker, script_lines)
         else:

@@ -26,6 +26,9 @@ from app.services import (
     volcengine_seedance,
 )
 from app.utils import utils
+# >>> MPT COGVIDEOX LOCAL v0.3.0 >>>
+from app.services import cogvideox_local
+# <<< MPT COGVIDEOX LOCAL v0.3.0 <<<
 
 # Thread-safe counter for API key rotation
 _api_key_counter = 0
@@ -1692,6 +1695,30 @@ def download_videos(
         material_directory = utils.task_dir(task_id)
     elif material_directory and not os.path.isdir(material_directory):
         material_directory = ""
+
+    # >>> MPT COGVIDEOX LOCAL v0.3.0 >>>
+    if source == "cogvideox_local":
+        try:
+            generated = cogvideox_local.generate_videos(
+                task_id=task_id,
+                search_terms=search_terms,
+                video_aspect=video_aspect,
+                audio_duration=audio_duration,
+                max_clip_duration=max_clip_duration,
+            )
+            if generated:
+                return generated
+        except Exception as exc:
+            logger.exception(f"CogVideoX Local generation failed: {exc}")
+        if bool(config.app.get("cogvideox_fallback_openai_image", True)):
+            logger.warning(
+                "CogVideoX Local failed; automatically falling back to "
+                "the configured OpenAI-compatible image provider"
+            )
+            source = "openai_image"
+        else:
+            return []
+    # <<< MPT COGVIDEOX LOCAL v0.3.0 <<<
 
     if source == "wavespeed":
         # AI 生成按条计费，不能沿用库存源"先为全部关键词取回候选、再挑选"

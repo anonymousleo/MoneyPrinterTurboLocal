@@ -497,6 +497,7 @@ def save_config():
         config_to_save["minimax_tts"] = dict(minimax_tts)
         config_to_save["elevenlabs"] = dict(elevenlabs)
         config_to_save["chatterbox"] = dict(chatterbox)
+        config_to_save["whisper"] = dict(whisper)
         config_to_save["fish_audio"] = dict(fish_audio)
         config_to_save["ui"] = dict(ui)
         serialized_config = toml.dumps(config_to_save)
@@ -546,7 +547,7 @@ def save_config():
 
 _cfg = load_config()
 app = _SynchronizedConfig(_cfg.get("app", {}))
-whisper = _cfg.get("whisper", {})
+whisper = _SynchronizedConfig(_cfg.get("whisper", {}))
 proxy = _cfg.get("proxy", {})
 azure = _SynchronizedConfig(_cfg.get("azure", {}))
 siliconflow = _SynchronizedConfig(_cfg.get("siliconflow", {}))

@@ -1,3 +1,11 @@
+<!-- LOCALAI_FORK_NOTICE -->
+> [!NOTE]
+> **MoneyPrinterTurbo-LocalAI** is a derivative fork of
+> [harry0703/MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo). Upstream work remains credited
+> under its MIT License. Local-AI-specific contributions maintained by
+> **Muhammad Salman (@anonymousleo)** are documented in
+> [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) and [`NOTICE.md`](NOTICE.md).
+
 <div align="center">
 
 # MoneyPrinterTurbo 💸

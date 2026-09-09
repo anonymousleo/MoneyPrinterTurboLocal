@@ -31,6 +31,10 @@ from app.services import (
     voice,
 )
 from app.services import upload_post
+# >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+# MPT-LOCAL-AUTO-LABEL: task runtime import
+from app.services import local_auto_runtime
+# <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
 from app.services import state as sm
 from app.utils import file_security, utils
 
@@ -477,6 +481,92 @@ def _resolve_reusable_voice_preview(
     return preview_file, math.ceil(duration), sub_maker
 
 
+
+def _extract_tts_narration(video_script: str) -> str:
+    """Extract spoken narration from screenplay-style scripts.
+
+    If explicit VOICEOVER/V.O./VO/NARRATION markers are present, return only
+    those blocks. Otherwise preserve legacy MoneyPrinterTurbo behavior and
+    return the whole script unchanged.
+    """
+    import re
+
+    source = str(video_script or "").strip()
+    if not source:
+        return ""
+
+    narration_marker = re.compile(
+        r"^\s*(?:\*{1,2})?\s*"
+        r"(?:VOICE\s*OVER|VOICEOVER|V\.?\s*O\.?|VO|NARRATION)"
+        r"(?:\s*\([^)]*\))?\s*:?\s*(?:\*{1,2})?\s*",
+        flags=re.IGNORECASE,
+    )
+    structural_marker = re.compile(
+        r"^\s*(?:\*{1,2})?\s*(?:"
+        r"VIDEO|VISUALS?|CAMERA(?:\s+SETTING)?|AUDIO|SFX|MUSIC|"
+        r"TEXT(?:\s+OVERLAY)?|END\s*CARD|SCENE(?:\s+(?:START|END))?|"
+        r"TECHNICAL(?:\s+PRODUCTION)?\s+NOTES?|VISUAL\s+TRANSITION|"
+        r"THE\s+GAZE|THE\s+ENDING"
+        r")\b",
+        flags=re.IGNORECASE,
+    )
+
+    blocks = []
+    current = []
+    capturing = False
+
+    def flush():
+        nonlocal current
+        if current:
+            text = " ".join(x.strip() for x in current if x.strip()).strip()
+            text = re.sub(r"\s+", " ", text)
+            text = text.replace("**", "").replace("__", "")
+            text = text.strip(" -*_\t")
+            if text:
+                blocks.append(text)
+        current = []
+
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+
+        marker_match = narration_marker.match(line)
+        if marker_match:
+            flush()
+            capturing = True
+            remainder = line[marker_match.end():].strip()
+            if remainder:
+                current.append(remainder)
+            continue
+
+        if not capturing:
+            continue
+
+        if not line:
+            flush()
+            capturing = False
+            continue
+
+        if line.startswith('---') or structural_marker.match(line):
+            flush()
+            capturing = False
+            continue
+
+        plain = line.lstrip('*_ ').upper()
+        if re.match(r'^[A-Z][A-Z0-9 /().&_-]{2,45}:\s*', plain):
+            flush()
+            capturing = False
+            continue
+
+        current.append(line)
+
+    flush()
+
+    if not blocks:
+        return source
+
+    return " ".join(blocks).strip()
+
+
 def generate_audio(
     task_id,
     params,
@@ -525,8 +615,19 @@ def generate_audio(
 
         logger.info("no custom audio file provided, using TTS to generate audio.")
         audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
+        tts_text = _extract_tts_narration(video_script)
+        if not tts_text:
+            _mark_task_failed(task_id, "audio", "video script contains no speakable narration")
+            return None, None, None
+        if tts_text != str(video_script or "").strip():
+            logger.info(
+                "screenplay-style script detected; TTS will speak narration only: "
+                f"{len(tts_text)} chars vs {len(str(video_script or '').strip())} total script chars"
+            )
+        else:
+            logger.info(f"TTS narration length: {len(tts_text)} chars")
         sub_maker = voice.tts(
-            text=video_script,
+            text=tts_text,
             voice_name=voice.parse_voice_name(params.voice_name),
             voice_rate=params.voice_rate,
             voice_file=audio_file,
@@ -596,9 +697,14 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
         )
         return ""
 
+    is_word_level = getattr(params, "subtitle_display_mode", "sentence") == "word_by_word"
+
     if subtitle_provider == "edge":
         voice.create_subtitle(
-            text=video_script, sub_maker=sub_maker, subtitle_file=subtitle_path
+            text=video_script,
+            sub_maker=sub_maker,
+            subtitle_file=subtitle_path,
+            word_level=is_word_level,
         )
         if not os.path.exists(subtitle_path):
             # Edge 字幕偶尔会因为时间轴与文案无法匹配而没有产出文件。这里不能
@@ -612,9 +718,14 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
             return ""
 
     if subtitle_provider == "whisper":
-        subtitle.create(audio_file=audio_file, subtitle_file=subtitle_path)
-        logger.info("\n\n## correcting subtitle")
-        subtitle.correct(subtitle_file=subtitle_path, video_script=video_script)
+        subtitle.create(
+            audio_file=audio_file,
+            subtitle_file=subtitle_path,
+            word_level=is_word_level,
+        )
+        if not is_word_level:
+            logger.info("\n\n## correcting subtitle")
+            subtitle.correct(subtitle_file=subtitle_path, video_script=video_script)
 
     subtitle_lines = subtitle.file_to_subtitles(subtitle_path)
     if not subtitle_lines:
@@ -1420,6 +1531,10 @@ def _run_pipeline(
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20)
 
+    # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+    # MPT-LOCAL-AUTO-LABEL: LLM -> TTS GPU handoff
+    local_auto_runtime.release_ollama()
+    # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
     # 3. Generate audio
     audio_file, audio_duration, sub_maker = generate_audio(
         task_id,
@@ -1462,6 +1577,11 @@ def _run_pipeline(
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
 
+    # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+    # MPT-LOCAL-AUTO-LABEL: TTS -> LocalAI GPU handoff
+    if params.video_source == "openai_image":
+        local_auto_runtime.ensure_localai()
+    # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
     # 5. Get video materials
     downloaded_videos = get_video_materials(
         task_id,
@@ -1470,6 +1590,11 @@ def _run_pipeline(
         audio_duration,
         loomloom_video_request=loomloom_video_request,
     )
+    # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+    # MPT-LOCAL-AUTO-LABEL: LocalAI -> encoder GPU handoff
+    if params.video_source == "openai_image":
+        local_auto_runtime.release_localai_gpu()
+    # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
     if not downloaded_videos:
         return _mark_task_failed(
             task_id,
@@ -1604,6 +1729,11 @@ def start(
             "pipeline",
             f"{type(exc).__name__}: {exc}",
         )
+    finally:
+        # >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+        # MPT-LOCAL-AUTO-LABEL: task final cleanup
+        local_auto_runtime.cleanup_transient_gpu_services()
+        # <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
 
 
 if __name__ == "__main__":

@@ -44,10 +44,16 @@ from app.models.schema import (
     VideoTransitionMode,
 )
 from app.services import bgm as bgm_service
+# >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+# MPT-LOCAL-AUTO-LABEL: task runtime WebUI import
+# local_auto_runtime imported in list
+# <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
 from app.services import (
     cache_manager,
     llm,
     loomloom,
+    local_models,
+    local_auto_runtime,
     material,
     metaso_minimax,
     ofox,
@@ -115,6 +121,7 @@ VIDEO_SOURCE_GROUPS = {
         "volcengine_seedance",
         "wavespeed",
         "ofox",
+        "cogvideox_local",
     ),
     "ai_image": ("openai_image",),
     "local": ("local",),
@@ -132,6 +139,8 @@ DEFAULT_SUBTITLE_SETTINGS = {
     "subtitle_enabled": True,
     "font_name": "MicrosoftYaHeiBold.ttc",
     "subtitle_position": "bottom",
+    "subtitle_display_mode": "sentence",
+    "subtitle_animation": "none",
     "custom_position": 70.0,
     "text_fore_color": "#FFFFFF",
     "font_size": 60,
@@ -176,6 +185,7 @@ _RUNTIME_CONFIG_SECTIONS = {
     "app": config.app,
     "azure": config.azure,
     "chatterbox": config.chatterbox,
+    "whisper": config.whisper,
     "elevenlabs": config.elevenlabs,
     "minimax_tts": config.minimax_tts,
     "siliconflow": config.siliconflow,
@@ -1367,6 +1377,12 @@ def _apply_restored_params(params):
     bgm_type = params.get("bgm_type") or ""
     _set_stable_widget_value("bgm_type_select", bgm_type)
     _set_stable_widget_value("bgm_volume_select", params.get("bgm_volume", 0.2))
+    if bgm_type == "preset" and params.get("bgm_file"):
+        # 预设歌曲控件使用文件名作为稳定业务值。历史任务可能保存绝对路径或
+        # 相对路径，统一取 basename 后即可匹配当前安全枚举出的歌曲列表。
+        _set_stable_widget_value(
+            "preset_song_select", os.path.basename(str(params["bgm_file"]))
+        )
     st.session_state["custom_bgm_file_input"] = params.get("bgm_file") or ""
     st.session_state["sonilo_bgm_prompt_input"] = (
         params.get("video_music_prompt") or params.get("sonilo_bgm_prompt") or ""
@@ -1382,6 +1398,12 @@ def _apply_restored_params(params):
     _set_stable_widget_value("font_name_select", params.get("font_name") or "")
     _set_stable_widget_value(
         "subtitle_position_select", params.get("subtitle_position") or "bottom"
+    )
+    _set_stable_widget_value(
+        "subtitle_display_mode_select", params.get("subtitle_display_mode") or "sentence"
+    )
+    _set_stable_widget_value(
+        "subtitle_animation_select", params.get("subtitle_animation") or "none"
     )
     custom_position = min(100.0, max(0.0, float(params.get("custom_position", 70.0))))
     st.session_state["custom_position_input"] = str(custom_position)
@@ -1546,6 +1568,16 @@ def _render_top_bar():
             width="stretch",
         ):
             _render_task_manager_entry()
+
+            st.button(
+                tr("Local Models Tab"),
+                key="open_local_models_dialog_button",
+                type="secondary",
+                icon=":material/download:",
+                width="content",
+                on_click=_open_settings_dialog,
+                args=("local_models",),
+            )
 
             st.button(
                 tr("Settings"),
@@ -2283,6 +2315,12 @@ def reset_subtitle_settings():
     st.session_state["subtitle_enabled_checkbox"] = defaults["subtitle_enabled"]
     _set_stable_widget_value("font_name_select", defaults["font_name"])
     _set_stable_widget_value("subtitle_position_select", defaults["subtitle_position"])
+    _set_stable_widget_value(
+        "subtitle_display_mode_select", defaults["subtitle_display_mode"]
+    )
+    _set_stable_widget_value(
+        "subtitle_animation_select", defaults["subtitle_animation"]
+    )
     st.session_state["custom_position_input"] = str(defaults["custom_position"])
     st.session_state["font_color_picker"] = defaults["text_fore_color"]
     st.session_state["font_size_slider"] = defaults["font_size"]
@@ -2303,6 +2341,8 @@ def reset_subtitle_settings():
         "subtitle_enabled",
         "font_name",
         "subtitle_position",
+        "subtitle_display_mode",
+        "subtitle_animation",
         "custom_position",
         "text_fore_color",
         "font_size",
@@ -2312,7 +2352,8 @@ def reset_subtitle_settings():
         "subtitle_background_color",
         "rounded_subtitle_background",
     ):
-        _set_runtime_config("ui", key, defaults[key])
+        if key in defaults:
+            _set_runtime_config("ui", key, defaults[key])
 
 
 @st.dialog(tr("Final Prompt Preview"), width="large")
@@ -2669,6 +2710,17 @@ def _build_settings_preset_payload(params, app_version):
         for key, value in params.items()
         if key not in PRESET_EXCLUDED_PARAM_KEYS
     }
+    if params.get("bgm_type") == "preset" and params.get("bgm_file"):
+        try:
+            builtin_bgm_path = bgm_service.resolve_builtin_bgm_file(
+                str(params["bgm_file"])
+            )
+        except ValueError:
+            # 自定义文件属于本机资源，不能进入可移植的设置预设。异常场景下保持
+            # 既有排除行为，避免导出文件包含绝对路径或另一台设备不存在的 UUID。
+            pass
+        else:
+            preset_params["bgm_file"] = Path(builtin_bgm_path).name
     return {
         "schema": SETTINGS_PRESET_SCHEMA,
         "version": SETTINGS_PRESET_VERSION,
@@ -2696,6 +2748,13 @@ def _parse_settings_preset(raw_bytes):
         for key, value in preset_params.items()
         if key not in PRESET_EXCLUDED_PARAM_KEYS
     }
+    if preset_params.get("bgm_type") == "preset" and preset_params.get("bgm_file"):
+        # 设置预设只能恢复当前版本真实存在的内置歌曲。服务层同时拒绝目录分隔符
+        # 和用户上传文件，防止导入文件借试听功能读取任意本机路径。
+        builtin_bgm_path = bgm_service.resolve_builtin_bgm_file(
+            str(preset_params["bgm_file"])
+        )
+        params_input["bgm_file"] = Path(builtin_bgm_path).name
     # video_subject 是 VideoParams 的必填字段，但预设允许只保存风格设置。
     params_input.setdefault("video_subject", "")
     return VideoParams.model_validate(params_input).model_dump(mode="json")
@@ -2836,6 +2895,607 @@ def _render_key_backup_settings(panel):
         st.rerun(scope="app")
 
 
+def _localai_management_api_key() -> str:
+    """Return the first configured image-gateway key for LocalAI admin calls."""
+    raw = config.app.get("openai_image_api_keys", [])
+    if isinstance(raw, str):
+        raw = [part.strip() for part in raw.split(",") if part.strip()]
+    return str(raw[0]).strip() if raw else ""
+
+
+def _reset_local_preset_widget_state():
+    """Clear widgets whose values would otherwise overwrite a newly applied preset."""
+    stable_keys = (
+        "llm_provider_select",
+        "ollama_model_name_input",
+        "video_source_select",
+        "tts_server_select",
+        "speech_synthesis_select_chatterbox",
+        "voice_mode_control",
+        "bgm_type_select",
+    )
+    for key in stable_keys:
+        widget_key = localized_widget_key(key)
+        st.session_state.pop(widget_key, None)
+        st.session_state.pop(f"{widget_key}_component", None)
+
+
+def _apply_fully_local_preset(
+    *,
+    ollama_model: str,
+    whisper_model: str,
+    localai_base_url: str,
+    chatterbox_base_url: str,
+):
+    """Configure MPT so generation avoids paid/cloud inference providers."""
+    _set_runtime_config("app", "llm_provider", "ollama")
+    _set_runtime_config("app", "ollama_model_name", ollama_model)
+    # Empty base URL preserves MoneyPrinterTurbo's Docker-aware Ollama default.
+    _delete_runtime_config("app", "ollama_base_url")
+
+    _set_runtime_config("app", "video_source", "openai_image")
+    _set_runtime_config("app", "openai_image_base_url", localai_base_url.rstrip("/"))
+    _set_runtime_config("app", "openai_image_api_keys", [])
+    _set_runtime_config(
+        "app", "openai_image_model", local_models.LOCALAI_IMAGE_MODELS[0].id
+    )
+
+    _set_runtime_config("app", "subtitle_provider", "whisper")
+    _set_runtime_config("whisper", "model_size", whisper_model)
+
+    _set_runtime_config("chatterbox", "base_url", chatterbox_base_url.rstrip("/"))
+    _set_runtime_config("chatterbox", "api_key", "")
+    _set_runtime_config("chatterbox", "model_id", DEFAULT_CHATTERBOX_MODEL)
+    _set_runtime_config("chatterbox", "voices", DEFAULT_CHATTERBOX_VOICES)
+
+    _set_runtime_config("ui", "voice_mode", VOICE_MODE_TTS)
+    _set_runtime_config("ui", "tts_server", "chatterbox")
+    _set_runtime_config("ui", "voice_name", "chatterbox:default-Female")
+    _set_runtime_config("ui", "bgm_type", "random")
+
+    # Local-only preset must not silently publish generated media or route audio
+    # to optional paid music providers.
+    _set_runtime_config("app", "upload_post_enabled", False)
+    _set_runtime_config("app", "upload_post_auto_upload", False)
+    _reset_local_preset_widget_state()
+    _save_runtime_config()
+
+
+def _render_runtime_badge(container, label: str, status: dict):
+    ok = bool(status.get("ok"))
+    icon = "✅" if ok else "❌"
+    detail = str(status.get("detail") or "")
+    container.markdown(f"**{icon} {label}**")
+    container.caption(detail)
+
+
+def _render_local_models_settings(panel):
+    """Local-model download, health-check, and zero-paid-API setup center."""
+    with panel:
+        st.markdown(f"### {tr('Local Models Center')}")
+        st.info(tr("Local Models Center Help"))
+        st.warning(tr("Local Model License Warning"))
+
+        default_ollama_url = str(config.app.get("ollama_base_url", "") or "")
+        effective_ollama_url = default_ollama_url or config.get_default_ollama_base_url()
+        configured_image_base_url = str(
+            config.app.get("openai_image_base_url", "") or ""
+        ).strip()
+        localai_base_url = (
+            configured_image_base_url
+            if local_models.is_local_service_url(configured_image_base_url)
+            else "http://127.0.0.1:8081/v1"
+        )
+        configured_chatterbox_url = str(
+            config.chatterbox.get("base_url", "") or DEFAULT_CHATTERBOX_BASE_URL
+        ).strip()
+        chatterbox_base_url = (
+            configured_chatterbox_url
+            if local_models.is_local_service_url(configured_chatterbox_url)
+            else DEFAULT_CHATTERBOX_BASE_URL
+        )
+        localai_api_key = (
+            _localai_management_api_key()
+            if configured_image_base_url == localai_base_url
+            else ""
+        )
+
+        with st.container(border=True):
+            st.markdown(f"#### {tr('Local Runtime Health')}")
+            if st.button(
+                tr("Refresh Local Runtime Health"),
+                key="refresh_local_runtime_health",
+                icon=":material/refresh:",
+                use_container_width=True,
+            ) or "local_runtime_health" not in st.session_state:
+                with st.spinner(tr("Checking Local Runtimes")):
+                    st.session_state["local_runtime_health"] = (
+                        local_models.runtime_health_snapshot(
+                            ollama_base_url=effective_ollama_url,
+                            localai_base_url=localai_base_url,
+                            localai_api_key=localai_api_key,
+                            chatterbox_base_url=chatterbox_base_url,
+                        )
+                    )
+            health = st.session_state.get("local_runtime_health", {})
+            health_cols = st.columns(4)
+            _render_runtime_badge(health_cols[0], "Ollama", health.get("ollama", {}))
+            _render_runtime_badge(health_cols[1], "LocalAI", health.get("localai", {}))
+            _render_runtime_badge(
+                health_cols[2], "Chatterbox", health.get("chatterbox", {})
+            )
+            _render_runtime_badge(health_cols[3], "FFmpeg", health.get("ffmpeg", {}))
+
+        with st.container(border=True):
+            st.markdown(f"#### {tr('Fully Local Preset')}")
+            preset_col1, preset_col2 = st.columns(2)
+            preset_ollama = preset_col1.selectbox(
+                tr("Preset Ollama Model"),
+                options=[item.id for item in local_models.OLLAMA_MODELS],
+                index=1,
+                format_func=lambda model_id: (
+                    local_models.get_model_spec(local_models.OLLAMA_MODELS, model_id).name
+                ),
+                key="local_preset_ollama_model",
+            )
+            preset_whisper = preset_col2.selectbox(
+                tr("Preset Whisper Model"),
+                options=[item.id for item in local_models.WHISPER_MODELS],
+                index=2,
+                format_func=lambda model_id: (
+                    local_models.get_model_spec(local_models.WHISPER_MODELS, model_id).name
+                ),
+                key="local_preset_whisper_model",
+            )
+            st.caption(tr("Fully Local Preset Help"))
+            if st.button(
+                tr("Apply Fully Local Preset"),
+                key="apply_fully_local_preset",
+                type="primary",
+                icon=":material/offline_bolt:",
+                use_container_width=True,
+            ):
+                _apply_fully_local_preset(
+                    ollama_model=preset_ollama,
+                    whisper_model=preset_whisper,
+                    localai_base_url=localai_base_url,
+                    chatterbox_base_url=chatterbox_base_url,
+                )
+                st.success(tr("Fully Local Preset Applied"))
+
+        with st.container(border=True):
+            st.markdown("#### Ollama — Local LLM")
+            st.caption(tr("Ollama Local Model Help"))
+            link_col1, link_col2 = st.columns(2)
+            link_col1.link_button(
+                tr("Download Ollama Runtime"),
+                "https://ollama.com/download",
+                use_container_width=True,
+            )
+            link_col2.link_button(
+                tr("Browse Ollama Models"),
+                "https://ollama.com/library",
+                use_container_width=True,
+            )
+
+            ollama_url = st.text_input(
+                tr("Ollama Base URL"),
+                value=effective_ollama_url,
+                key="local_models_ollama_base_url",
+                help=tr("Ollama Base URL Help"),
+            ).strip()
+            selected_ollama = st.selectbox(
+                tr("Free Ollama Model"),
+                options=[item.id for item in local_models.OLLAMA_MODELS],
+                index=1,
+                format_func=lambda model_id: (
+                    f"{local_models.get_model_spec(local_models.OLLAMA_MODELS, model_id).name} "
+                    f"({local_models.get_model_spec(local_models.OLLAMA_MODELS, model_id).approx_size})"
+                ),
+                key="download_ollama_model_select",
+            )
+            ollama_spec = local_models.get_model_spec(
+                local_models.OLLAMA_MODELS, selected_ollama
+            )
+            if ollama_spec:
+                st.caption(
+                    f"{ollama_spec.license_name} · {ollama_spec.notes}"
+                )
+
+            ollama_download_col, ollama_use_col = st.columns(2)
+            if ollama_download_col.button(
+                tr("Download Selected Ollama Model"),
+                key="download_selected_ollama_model",
+                icon=":material/download:",
+                use_container_width=True,
+            ):
+                progress = st.progress(0, text=tr("Starting Model Download"))
+
+                def _on_ollama_progress(status, completed, total):
+                    if isinstance(completed, int) and isinstance(total, int) and total > 0:
+                        fraction = min(1.0, max(0.0, completed / total))
+                        progress.progress(fraction, text=status)
+                    else:
+                        progress.progress(0, text=status)
+
+                try:
+                    local_models.pull_ollama_model(
+                        selected_ollama,
+                        ollama_url,
+                        progress_callback=_on_ollama_progress,
+                    )
+                except Exception as exc:
+                    st.error(tr("Local Model Download Failed").format(error=exc))
+                else:
+                    progress.progress(1.0, text=tr("Model Download Complete"))
+                    st.success(
+                        tr("Local Model Downloaded").format(model=selected_ollama)
+                    )
+                    st.session_state.pop("local_runtime_health", None)
+
+            if ollama_use_col.button(
+                tr("Use Selected Ollama Model"),
+                key="use_selected_ollama_model",
+                icon=":material/check_circle:",
+                use_container_width=True,
+            ):
+                _set_runtime_config("app", "llm_provider", "ollama")
+                _set_runtime_config("app", "ollama_model_name", selected_ollama)
+                _set_runtime_config("app", "ollama_base_url", ollama_url)
+                _save_runtime_config()
+                st.success(tr("Ollama Model Activated").format(model=selected_ollama))
+
+            with st.expander(tr("Custom Ollama Model"), expanded=False):
+                custom_ollama = st.text_input(
+                    tr("Custom Ollama Model Tag"),
+                    placeholder="qwen3:30b",
+                    key="custom_ollama_model_tag",
+                ).strip()
+                st.caption(tr("Custom Ollama Model Safety Help"))
+                if st.button(
+                    tr("Download Custom Ollama Model"),
+                    key="download_custom_ollama_model",
+                    disabled=not custom_ollama,
+                    use_container_width=True,
+                ):
+                    try:
+                        validated_tag = local_models.validate_ollama_model_tag(
+                            custom_ollama
+                        )
+                        local_models.pull_ollama_model(validated_tag, ollama_url)
+                    except Exception as exc:
+                        st.error(tr("Local Model Download Failed").format(error=exc))
+                    else:
+                        st.success(
+                            tr("Local Model Downloaded").format(model=validated_tag)
+                        )
+
+        with st.container(border=True):
+            st.markdown("#### faster-whisper — Local Subtitles")
+            st.caption(tr("Whisper Local Model Help"))
+            selected_whisper = st.selectbox(
+                tr("Whisper Model"),
+                options=[item.id for item in local_models.WHISPER_MODELS],
+                index=2,
+                format_func=lambda model_id: (
+                    f"{local_models.get_model_spec(local_models.WHISPER_MODELS, model_id).name} "
+                    f"({local_models.get_model_spec(local_models.WHISPER_MODELS, model_id).approx_size})"
+                ),
+                key="download_whisper_model_select",
+            )
+            whisper_path = local_models.whisper_model_dir(selected_whisper)
+            if local_models.is_whisper_model_downloaded(selected_whisper):
+                st.success(tr("Whisper Model Already Downloaded").format(path=whisper_path))
+            else:
+                st.caption(tr("Whisper Model Not Downloaded").format(path=whisper_path))
+
+            whisper_download_col, whisper_use_col = st.columns(2)
+            if whisper_download_col.button(
+                tr("Download Whisper Model"),
+                key="download_whisper_model",
+                icon=":material/download:",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner(tr("Downloading Whisper Model")):
+                        target = local_models.download_whisper_model(selected_whisper)
+                except Exception as exc:
+                    st.error(tr("Local Model Download Failed").format(error=exc))
+                else:
+                    st.success(tr("Whisper Model Downloaded").format(path=target))
+                    st.session_state.pop("local_runtime_health", None)
+
+            if whisper_use_col.button(
+                tr("Use Whisper Model"),
+                key="use_whisper_model",
+                icon=":material/subtitles:",
+                use_container_width=True,
+            ):
+                _set_runtime_config("app", "subtitle_provider", "whisper")
+                _set_runtime_config("whisper", "model_size", selected_whisper)
+                _save_runtime_config()
+                st.success(tr("Whisper Model Activated").format(model=selected_whisper))
+
+            whisper_device_col, whisper_compute_col = st.columns(2)
+            whisper_device = whisper_device_col.selectbox(
+                tr("Whisper Device"),
+                options=["cpu", "cuda"],
+                index=1 if config.whisper.get("device") == "cuda" else 0,
+                key="local_whisper_device",
+            )
+            compute_options = ["int8", "float16", "int8_float16"]
+            saved_compute = str(config.whisper.get("compute_type", "int8"))
+            whisper_compute = whisper_compute_col.selectbox(
+                tr("Whisper Compute Type"),
+                options=compute_options,
+                index=(compute_options.index(saved_compute) if saved_compute in compute_options else 0),
+                key="local_whisper_compute_type",
+            )
+            _set_runtime_config("whisper", "device", whisper_device)
+            _set_runtime_config("whisper", "compute_type", whisper_compute)
+
+        with st.container(border=True):
+            st.markdown("#### Chatterbox — Local TTS")
+            st.caption(tr("Chatterbox Local Setup Help"))
+            chatter_link_col1, chatter_link_col2 = st.columns(2)
+            chatter_link_col1.link_button(
+                tr("Open Chatterbox Project"),
+                local_models.CHATTERBOX_SOURCE_URL,
+                use_container_width=True,
+            )
+            chatter_link_col2.link_button(
+                tr("Install uv Runtime"),
+                "https://docs.astral.sh/uv/getting-started/installation/",
+                use_container_width=True,
+            )
+            chatterbox_url = st.text_input(
+                tr("Chatterbox Base URL"),
+                value=chatterbox_base_url,
+                key="local_models_chatterbox_base_url",
+            ).strip()
+            managed, pid, log_file = local_models.chatterbox_managed_process_status()
+            st.caption(
+                tr("Chatterbox Managed Status").format(
+                    status=(tr("Running") if managed else tr("Stopped")),
+                    pid=pid or "-",
+                    path=local_models.chatterbox_install_dir(),
+                )
+            )
+            c1, c2, c3 = st.columns(3)
+            if c1.button(
+                tr("Download Chatterbox Server"),
+                key="download_chatterbox_server",
+                icon=":material/download:",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner(tr("Downloading Chatterbox Server")):
+                        path = local_models.clone_or_update_chatterbox()
+                except Exception as exc:
+                    st.error(tr("Chatterbox Operation Failed").format(error=exc))
+                else:
+                    st.success(tr("Chatterbox Server Downloaded").format(path=path))
+            if c2.button(
+                tr("Install Chatterbox Dependencies"),
+                key="install_chatterbox_dependencies",
+                icon=":material/package_2:",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner(tr("Installing Chatterbox Dependencies")):
+                        path = local_models.install_chatterbox_dependencies()
+                except Exception as exc:
+                    st.error(tr("Chatterbox Operation Failed").format(error=exc))
+                else:
+                    st.success(tr("Chatterbox Dependencies Installed").format(path=path))
+            if managed:
+                if c3.button(
+                    tr("Stop Chatterbox Server"),
+                    key="stop_chatterbox_server",
+                    icon=":material/stop_circle:",
+                    use_container_width=True,
+                ):
+                    local_models.stop_chatterbox_server()
+                    st.session_state.pop("local_runtime_health", None)
+                    st.success(tr("Chatterbox Server Stopped"))
+            else:
+                if c3.button(
+                    tr("Start Chatterbox Server"),
+                    key="start_chatterbox_server",
+                    icon=":material/play_circle:",
+                    use_container_width=True,
+                ):
+                    try:
+                        pid = local_models.start_chatterbox_server()
+                    except Exception as exc:
+                        st.error(tr("Chatterbox Operation Failed").format(error=exc))
+                    else:
+                        st.session_state.pop("local_runtime_health", None)
+                        st.success(tr("Chatterbox Server Started").format(pid=pid))
+
+            warm_col, use_tts_col = st.columns(2)
+            if warm_col.button(
+                tr("Download Warm Up Chatterbox Model"),
+                key="warmup_chatterbox_model",
+                icon=":material/model_training:",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner(tr("Downloading Warming Chatterbox Model")):
+                        audio_bytes = local_models.warmup_chatterbox_model(
+                            chatterbox_url,
+                            config.chatterbox.get("api_key", ""),
+                        )
+                except Exception as exc:
+                    st.error(tr("Chatterbox Operation Failed").format(error=exc))
+                else:
+                    st.success(
+                        tr("Chatterbox Model Ready").format(bytes=audio_bytes)
+                    )
+            if use_tts_col.button(
+                tr("Use Chatterbox TTS"),
+                key="use_chatterbox_tts",
+                icon=":material/record_voice_over:",
+                use_container_width=True,
+            ):
+                _set_runtime_config("chatterbox", "base_url", chatterbox_url)
+                _set_runtime_config("chatterbox", "api_key", "")
+                _set_runtime_config("ui", "voice_mode", VOICE_MODE_TTS)
+                _set_runtime_config("ui", "tts_server", "chatterbox")
+                _set_runtime_config("ui", "voice_name", "chatterbox:default-Female")
+                _save_runtime_config()
+                st.success(tr("Chatterbox TTS Activated"))
+
+            if log_file and Path(log_file).is_file():
+                with st.expander(tr("Chatterbox Server Log"), expanded=False):
+                    st.code(local_models.tail_file(log_file) or tr("No Log Output"))
+
+        with st.container(border=True):
+            st.markdown("#### LocalAI — Local Text-to-Image")
+            st.caption(tr("LocalAI Image Help"))
+            localai_link_col1, localai_link_col2 = st.columns(2)
+            localai_link_col1.link_button(
+                tr("Install LocalAI Runtime"),
+                "https://localai.io/basics/getting_started/",
+                use_container_width=True,
+            )
+            localai_link_col2.link_button(
+                tr("Browse LocalAI Models"),
+                "https://localai.io/docs/gallery.html",
+                use_container_width=True,
+            )
+
+            localai_url = st.text_input(
+                tr("LocalAI Base URL"),
+                value=localai_base_url,
+                key="local_models_localai_base_url",
+                help=tr("LocalAI Base URL Help"),
+            ).strip()
+            localai_key = st.text_input(
+                tr("LocalAI Admin API Key Optional"),
+                value=localai_api_key,
+                type="password",
+                key="local_models_localai_api_key",
+                help=tr("LocalAI Admin API Key Help"),
+            ).strip()
+            selected_localai = st.selectbox(
+                tr("LocalAI Image Model"),
+                options=[item.id for item in local_models.LOCALAI_IMAGE_MODELS],
+                format_func=lambda model_id: local_models.get_model_spec(
+                    local_models.LOCALAI_IMAGE_MODELS, model_id
+                ).name,
+                key="download_localai_model_select",
+            )
+            localai_spec = local_models.get_model_spec(
+                local_models.LOCALAI_IMAGE_MODELS, selected_localai
+            )
+            if localai_spec:
+                st.warning(f"{localai_spec.license_name} · {localai_spec.notes}")
+
+            localai_download_col, localai_use_col = st.columns(2)
+            if localai_download_col.button(
+                tr("Download LocalAI Image Model"),
+                key="download_localai_image_model",
+                icon=":material/download:",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner(tr("Requesting LocalAI Model Install")):
+                        result = local_models.install_localai_gallery_model(
+                            selected_localai, localai_url, localai_key
+                        )
+                except Exception as exc:
+                    st.error(tr("Local Model Download Failed").format(error=exc))
+                else:
+                    st.success(tr("LocalAI Model Install Requested"))
+                    st.json(result)
+                    job_uuid = str(result.get("uuid") or "").strip()
+                    if job_uuid:
+                        st.session_state["localai_model_install_job"] = job_uuid
+                    st.session_state.pop("local_runtime_health", None)
+
+            localai_job_uuid = str(
+                st.session_state.get("localai_model_install_job", "") or ""
+            ).strip()
+            if localai_job_uuid:
+                st.caption(
+                    tr("LocalAI Current Install Job").format(job=localai_job_uuid)
+                )
+                if st.button(
+                    tr("Check LocalAI Install Status"),
+                    key="check_localai_install_status",
+                    icon=":material/progress_activity:",
+                    use_container_width=True,
+                ):
+                    try:
+                        job_status = local_models.get_localai_model_job(
+                            localai_job_uuid, localai_url, localai_key
+                        )
+                    except Exception as exc:
+                        st.error(
+                            tr("LocalAI Install Status Failed").format(error=exc)
+                        )
+                    else:
+                        st.json(job_status)
+                        if job_status.get("error"):
+                            st.error(
+                                tr("LocalAI Install Job Error").format(
+                                    error=job_status.get("error")
+                                )
+                            )
+                        elif job_status.get("processed") is True:
+                            st.success(tr("LocalAI Install Job Complete"))
+                            st.session_state.pop("local_runtime_health", None)
+                        else:
+                            st.info(
+                                tr("LocalAI Install Job Running").format(
+                                    message=job_status.get("message")
+                                    or job_status.get("phase")
+                                    or "-"
+                                )
+                            )
+
+            if localai_use_col.button(
+                tr("Use LocalAI Image Model"),
+                key="use_localai_image_model",
+                icon=":material/image:",
+                use_container_width=True,
+            ):
+                _set_runtime_config("app", "video_source", "openai_image")
+                _set_runtime_config("app", "openai_image_base_url", localai_url)
+                _set_runtime_config(
+                    "app", "openai_image_api_keys", [localai_key] if localai_key else []
+                )
+                _set_runtime_config("app", "openai_image_model", selected_localai)
+                _save_runtime_config()
+                st.success(tr("LocalAI Image Model Activated").format(model=selected_localai))
+
+        with st.expander(tr("Local Model Catalog and Licenses"), expanded=False):
+            catalog = [
+                item.to_dict()
+                for item in (
+                    *local_models.OLLAMA_MODELS,
+                    *local_models.WHISPER_MODELS,
+                    *local_models.LOCALAI_IMAGE_MODELS,
+                )
+            ]
+            st.dataframe(
+                catalog,
+                use_container_width=True,
+                hide_index=True,
+                column_order=(
+                    "family",
+                    "name",
+                    "id",
+                    "approx_size",
+                    "license_name",
+                    "source_url",
+                ),
+            )
+
+
+
+
 # -----------------------------------------------------------------------------
 # 设置与提示词弹窗
 # -----------------------------------------------------------------------------
@@ -2857,6 +3517,7 @@ def _render_settings_dialog():
         _set_runtime_config("app", "hide_config", False)
         settings_tab_labels = [
             tr("LLM Settings Tab"),
+            tr("Local Models Tab"),
             tr("Material API Tab"),
             tr("Auto-Publish Settings"),
             tr("Interface Settings Tab"),
@@ -2865,6 +3526,7 @@ def _render_settings_dialog():
         ]
         settings_tab_targets = {
             "llm": tr("LLM Settings Tab"),
+            "local_models": tr("Local Models Tab"),
             "material": tr("Material API Tab"),
         }
         settings_tabs_key = localized_widget_key("settings_dialog_tabs")
@@ -2876,6 +3538,7 @@ def _render_settings_dialog():
 
         (
             middle_config_panel,
+            local_models_panel,
             right_config_panel,
             publish_config_panel,
             left_config_panel,
@@ -2975,6 +3638,7 @@ def _render_settings_dialog():
             _set_runtime_config("ui", "hide_log", hide_log)
 
         _render_cache_management_settings(cache_config_panel)
+        _render_local_models_settings(local_models_panel)
         # 密钥恢复会写回配置并清除密码控件状态，必须在下面渲染这些控件之前执行。
         _render_key_backup_settings(key_backup_panel)
 
@@ -4414,6 +5078,7 @@ def _render_video_settings(panel, params):
                 "metaso_minimax": tr("Metaso MiniMax H3"),
                 "loomloom": tr("Shengsuan Cloud AI Video"),
                 "openai_image": tr("OpenAI Compatible Text-to-Image"),
+                "cogvideox_local": "CogVideoX1.5 Local - Quality",
                 "local": tr("Local file"),
             }
             saved_video_source_name = str(
@@ -4443,6 +5108,68 @@ def _render_video_settings(panel, params):
                 st.caption(tr("OFox AI Video Help"))
             if params.video_source == "metaso_minimax":
                 st.caption(tr("Metaso MiniMax H3 Help"))
+            # >>> MPT COGVIDEOX LOCAL v0.3.0 >>>
+            if params.video_source == "cogvideox_local":
+                st.caption(
+                    "CogVideoX1.5-5B local text-to-video. The 8GB Safe preset uses "
+                    "INT8, sequential CPU offload and VAE slicing/tiling."
+                )
+                cog_cols = st.columns(4)
+                with cog_cols[0]:
+                    cog_steps = st.selectbox(
+                        "CogVideoX Steps",
+                        options=[20, 30, 50],
+                        index=[20, 30, 50].index(
+                            int(config.app.get("cogvideox_steps", 20))
+                            if int(config.app.get("cogvideox_steps", 20)) in [20, 30, 50]
+                            else 20
+                        ),
+                        key="cogvideox_steps_select",
+                    )
+                    _set_runtime_config("app", "cogvideox_steps", int(cog_steps))
+                with cog_cols[1]:
+                    cog_frames = st.selectbox(
+                        "CogVideoX Frames",
+                        options=[33, 49, 81],
+                        index=[33, 49, 81].index(
+                            int(config.app.get("cogvideox_num_frames", 49))
+                            if int(config.app.get("cogvideox_num_frames", 49)) in [33, 49, 81]
+                            else 49
+                        ),
+                        key="cogvideox_frames_select",
+                        help="33 = fastest/lowest memory; 49 = 8GB-safe default; 81 = slower/highest temporal detail.",
+                    )
+                    _set_runtime_config("app", "cogvideox_num_frames", int(cog_frames))
+                with cog_cols[2]:
+                    cog_guidance = st.slider(
+                        "CogVideoX Guidance",
+                        min_value=3.0,
+                        max_value=8.0,
+                        value=float(config.app.get("cogvideox_guidance_scale", 6.0)),
+                        step=0.5,
+                        key="cogvideox_guidance_slider",
+                    )
+                    _set_runtime_config("app", "cogvideox_guidance_scale", float(cog_guidance))
+                with cog_cols[3]:
+                    cog_seed = st.number_input(
+                        "CogVideoX Seed",
+                        min_value=0,
+                        max_value=2147483647,
+                        value=int(config.app.get("cogvideox_seed", 42)),
+                        step=1,
+                        key="cogvideox_seed_input",
+                    )
+                    _set_runtime_config("app", "cogvideox_seed", int(cog_seed))
+                cog_fallback = st.toggle(
+                    "Fallback to DreamShaper if CogVideoX fails",
+                    value=bool(config.app.get("cogvideox_fallback_openai_image", True)),
+                    key="cogvideox_fallback_toggle",
+                )
+                _set_runtime_config(
+                    "app", "cogvideox_fallback_openai_image", bool(cog_fallback)
+                )
+            # <<< MPT COGVIDEOX LOCAL v0.3.0 <<<
+
             if params.video_source == "local":
                 # Streamlit 的文件类型校验对扩展名大小写敏感，这里同时放行大小写两种形式。
                 local_file_types = sorted(
@@ -5426,6 +6153,7 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
     bgm_options = [
         (tr("No Background Music"), ""),
         (tr("Random Background Music"), "random"),
+        (tr("Preset Song"), "preset"),
         (tr("Custom Background Music"), "custom"),
         (tr("Sonilo Background Music"), "sonilo"),
         (tr("ElevenLabs Background Music"), "elevenlabs"),
@@ -5591,6 +6319,65 @@ def _render_background_music_settings(params, elevenlabs_api_key_rendered=False)
             # 完整校验；当前任务参数必须清空，避免 0 音量任务保存或解析该文件。
             params.bgm_file = ""
 
+    if params.bgm_type == "preset":
+        # 服务层已经统一完成扩展名、临时文件和符号链接校验。这里直接复用其
+        # 结果，避免 UI 维护第二套枚举规则，后续新增格式时也不会出现差异。
+        available_song_paths = bgm_service.list_builtin_bgm_files()
+        songs_by_name = {
+            os.path.basename(song_path): song_path for song_path in available_song_paths
+        }
+        available_songs = list(songs_by_name)
+        if not available_songs:
+            st.warning(tr("No Background Music Available"))
+            params.bgm_file = ""
+        else:
+            default_preset_song = _saved_ui_text("preset_song", available_songs[0])
+            requested_preset_song = st.session_state.get(
+                localized_widget_key("preset_song_select"), default_preset_song
+            )
+            if requested_preset_song not in available_songs:
+                # 历史任务或其它版本导出的设置可能引用当前安装中不存在的歌曲。
+                # 明确提示后由 stable_selectbox 回退第一首，避免静默换歌。
+                st.warning(tr("Selected Background Music Unavailable"))
+            selected_song = stable_selectbox(
+                tr("Preset Song"),
+                options=available_songs,
+                default_value=(
+                    default_preset_song
+                    if default_preset_song in available_songs
+                    else available_songs[0]
+                ),
+                key="preset_song_select",
+            )
+            _set_runtime_config("ui", "preset_song", selected_song)
+            # 用户选择歌曲后立即提供在线试听。播放器读取的是刚刚通过服务层
+            # 白名单校验得到的真实路径，不接受页面输入的任意文件路径。
+            selected_song_path = songs_by_name[selected_song]
+            preview_mime_type = (
+                mimetypes.guess_type(selected_song_path)[0] or "audio/mpeg"
+            )
+            preview_available = True
+            try:
+                # Streamlit 读取路径失败时会把 OSError 包装成内部异常，导致下面
+                # 无法按文件错误处理。先自行读取字节，既保持播放器行为，也让
+                # Docker 挂载短暂失效、权限变化等情况稳定落入可控分支。
+                selected_song_bytes = Path(selected_song_path).read_bytes()
+            except OSError as exc:
+                preview_available = False
+                # 文件可能在枚举后被其它进程删除。试听失败不能中断页面或视频
+                # 参数编辑，但需要保留日志以便定位运行环境和挂载问题。
+                logger.warning(
+                    "failed to preview preset background music: "
+                    f"name={selected_song}, error={str(exc)}"
+                )
+                st.warning(tr("Background Music Preview Failed"))
+            else:
+                st.audio(selected_song_bytes, format=preview_mime_type)
+            if bgm_enabled and preview_available:
+                params.bgm_file = selected_song
+            else:
+                params.bgm_file = ""
+
     if params.bgm_type == "sonilo":
         if previous_bgm_type != "sonilo":
             st.session_state["sonilo_bgm_prompt_input"] = _saved_ui_text(
@@ -5705,7 +6492,7 @@ def _render_audio_settings(panel, params):
             # Provider 下拉只负责选择自动配音服务；无配音已经由上方模式控制，
             # 不再作为 TTS Provider 混入列表，避免两个入口表达同一状态。
             tts_servers = [
-                ("azure-tts-v1", "Azure TTS V1"),
+                ("azure-tts-v1", "Azure TTS V1 (Edge TTS)"),
                 ("azure-tts-v2", "Azure TTS V2"),
                 ("siliconflow", "SiliconFlow TTS"),
                 ("gemini-tts", "Google Gemini TTS"),
@@ -6213,6 +7000,7 @@ def _render_subtitle_settings(panel, params):
                 (tr("Top"), "top"),
                 (tr("Center"), "center"),
                 (tr("Bottom"), "bottom"),
+                (tr("2/3 from Bottom"), "two_thirds_bottom"),
                 (tr("Custom"), "custom"),
             ]
             saved_subtitle_position = config.ui.get(
@@ -6230,11 +7018,70 @@ def _render_subtitle_settings(panel, params):
                 key="subtitle_position_select",
                 format_func=lambda value: dict(
                     (v, label) for label, v in subtitle_positions
-                )[value],
+                ).get(value, value),
                 disabled=subtitle_settings_disabled,
             )
             params.subtitle_position = selected_subtitle_position
             _set_runtime_config("ui", "subtitle_position", params.subtitle_position)
+
+            # Subtitle Display Mode (Sentence vs Single Word)
+            subtitle_display_modes = [
+                (tr("Sentence by Sentence"), "sentence"),
+                (tr("Single Word (Word by Word)"), "word_by_word"),
+            ]
+            saved_display_mode = config.ui.get(
+                "subtitle_display_mode",
+                DEFAULT_SUBTITLE_SETTINGS["subtitle_display_mode"],
+            )
+            saved_mode_idx = 0
+            for i, (_, mode_val) in enumerate(subtitle_display_modes):
+                if mode_val == saved_display_mode:
+                    saved_mode_idx = i
+                    break
+            selected_display_mode = stable_selectbox(
+                tr("Display Mode"),
+                options=[val for _, val in subtitle_display_modes],
+                default_value=subtitle_display_modes[saved_mode_idx][1],
+                key="subtitle_display_mode_select",
+                format_func=lambda value: dict(
+                    (v, label) for label, v in subtitle_display_modes
+                ).get(value, value),
+                help=tr("Word-by-word Timing Help"),
+                disabled=subtitle_settings_disabled,
+            )
+            params.subtitle_display_mode = selected_display_mode
+            _set_runtime_config(
+                "ui", "subtitle_display_mode", params.subtitle_display_mode
+            )
+
+            # Subtitle Animation (None vs Pop Spring)
+            subtitle_animations = [
+                (tr("None"), "none"),
+                (tr("Pop Up (Spring)"), "pop_spring"),
+            ]
+            saved_anim = config.ui.get(
+                "subtitle_animation",
+                DEFAULT_SUBTITLE_SETTINGS["subtitle_animation"],
+            )
+            saved_anim_idx = 0
+            for i, (_, anim_val) in enumerate(subtitle_animations):
+                if anim_val == saved_anim:
+                    saved_anim_idx = i
+                    break
+            selected_anim = stable_selectbox(
+                tr("Subtitle Animation"),
+                options=[val for _, val in subtitle_animations],
+                default_value=subtitle_animations[saved_anim_idx][1],
+                key="subtitle_animation_select",
+                format_func=lambda value: dict(
+                    (v, label) for label, v in subtitle_animations
+                ).get(value, value),
+                disabled=subtitle_settings_disabled,
+            )
+            params.subtitle_animation = selected_anim
+            _set_runtime_config(
+                "ui", "subtitle_animation", params.subtitle_animation
+            )
 
             if params.subtitle_position == "custom":
                 saved_custom_position = config.ui.get(
@@ -6496,6 +7343,7 @@ def _render_generation_controls(
             "metaso_minimax",
             "loomloom",
             "openai_image",
+            "cogvideox_local",
             "local",
         ]:
             _remove_active_generation_task(task_id)
@@ -6804,9 +7652,72 @@ def _render_generation_controls(
     return start_button
 
 
+# >>> MPT LOCAL AUTOMATIC v0.2.0 >>>
+# MPT-LOCAL-AUTO-LABEL: Local Automatic WebUI banner
+def _render_local_automatic_panel():
+    """Add local runtime controls without replacing original generation controls."""
+    enabled_before = bool(config.app.get("local_auto_enabled", False))
+    with st.container(border=True):
+        cols = st.columns([1.15, 1.0, 2.85], vertical_alignment="center")
+        with cols[0]:
+            enabled_now = st.toggle(
+                "Local Automatic Mode",
+                value=enabled_before,
+                key="local_auto_mode_toggle",
+                help=(
+                    "Automatically starts local services and hands the GPU from "
+                    "Ollama to Chatterbox to LocalAI. All normal video settings "
+                    "below remain user-controlled."
+                ),
+            )
+        if enabled_now != enabled_before:
+            _set_runtime_config("app", "local_auto_enabled", enabled_now)
+            config.save_config()
+        with cols[1]:
+            if st.button(
+                "Apply Local Preset",
+                key="apply_verified_local_auto_preset",
+                use_container_width=True,
+                type="secondary",
+            ):
+                local_auto_runtime.apply_verified_local_preset()
+                for key in (
+                    "llm_provider_select",
+                    "ollama_base_url_custom_input",
+                    "ollama_model_name_input",
+                    "video_source_select",
+                    "voice_mode_control",
+                    "tts_server_select",
+                    "speech_synthesis_select_chatterbox",
+                    "chatterbox_base_url_input",
+                    "chatterbox_model_input",
+                    "chatterbox_voices_input",
+                ):
+                    st.session_state.pop(key, None)
+                st.rerun()
+        with cols[2]:
+            health = local_auto_runtime.quick_health()
+            state = "ON" if enabled_now else "OFF"
+            st.caption(
+                f"Local Automatic: **{state}**  ·  "
+                f"Ollama {'ready' if health['ollama'] else 'on-demand'}  ·  "
+                f"Chatterbox {'installed' if health['chatterbox_installed'] else 'missing'}  ·  "
+                f"LocalAI {'ready' if health['localai'] else 'on-demand'}  ·  "
+                f"Whisper {'ready' if health['whisper'] else 'missing'}  ·  "
+                f"FFmpeg {'ready' if health['ffmpeg'] else 'missing'}"
+            )
+            if enabled_now:
+                st.caption(
+                    "GPU order: Ollama → Chatterbox → LocalAI → Whisper (CPU) → encoder. "
+                    "Every original video/audio/subtitle/material setting remains below."
+                )
+# <<< MPT LOCAL AUTOMATIC v0.2.0 <<<
+
+
 def _render_application():
     """按固定顺序渲染顶部栏、弹窗、生成表单和任务结果。"""
     _render_top_bar()
+    _render_local_automatic_panel()
 
     if st.session_state.get("settings_dialog_open", False):
         _render_settings_dialog()

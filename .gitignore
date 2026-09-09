@@ -42,3 +42,23 @@ htmlcov/
 .codegraph
 /docs/superpowers
 .understand-anything
+
+# MoneyPrinterTurbo-LocalAI runtime exclusions
+config.toml
+.env
+.env.*
+!.env.example
+models/
+storage/
+**/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
+*.bak
+*.backup
+*.before-*
+cogvideox_test/
+local_apps/chatterbox-tts-api/.env
+local_apps/chatterbox-tts-api/models/
+build_reports/
