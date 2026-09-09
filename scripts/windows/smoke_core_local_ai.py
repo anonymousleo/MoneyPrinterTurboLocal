@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import time
-import wave
+import struct
 from pathlib import Path
 
 import requests
@@ -57,21 +57,98 @@ def wait_for_health(session: requests.Session, timeout_s: int = 600) -> dict:
 
 
 def validate_wav(path: Path) -> None:
+    # Chatterbox may return WAVE_FORMAT_IEEE_FLOAT (format tag 3).
+    # Python 3.11's stdlib wave module rejects that valid WAV encoding,
+    # so parse RIFF chunks directly and let faster-whisper/PyAV perform
+    # the real audio decode in the next functional stage.
     if not path.is_file():
         fail("TTS output WAV was not created")
-    if path.stat().st_size < 10_000:
-        fail(f"TTS WAV suspiciously small: {path.stat().st_size} bytes")
-    with wave.open(str(path), "rb") as wf:
-        frames = wf.getnframes()
-        rate = wf.getframerate()
-        channels = wf.getnchannels()
-        duration = frames / float(rate)
-    print(
-        f"TTS_WAV_PASS bytes={path.stat().st_size} "
-        f"channels={channels} rate={rate} duration={duration:.2f}s"
-    )
+
+    file_size = path.stat().st_size
+    if file_size < 10_000:
+        fail(f"TTS WAV suspiciously small: {file_size} bytes")
+
+    raw = path.read_bytes()
+    if len(raw) < 44:
+        fail("TTS WAV is too small to contain a RIFF/WAVE header")
+    if raw[0:4] not in (b"RIFF", b"RF64") or raw[8:12] != b"WAVE":
+        fail(f"TTS response is not RIFF/WAVE: header={raw[:12]!r}")
+
+    fmt = None
+    data_size = None
+    offset = 12
+
+    while offset + 8 <= len(raw):
+        chunk_id = raw[offset:offset + 4]
+        chunk_size = struct.unpack_from("<I", raw, offset + 4)[0]
+        chunk_start = offset + 8
+        chunk_end = chunk_start + chunk_size
+
+        if chunk_end > len(raw):
+            fail(
+                f"Malformed WAV chunk {chunk_id!r}: "
+                f"declared={chunk_size} remaining={len(raw) - chunk_start}"
+            )
+
+        if chunk_id == b"fmt " and chunk_size >= 16:
+            (
+                format_tag,
+                channels,
+                sample_rate,
+                byte_rate,
+                block_align,
+                bits_per_sample,
+            ) = struct.unpack_from("<HHIIHH", raw, chunk_start)
+            fmt = {
+                "format_tag": format_tag,
+                "channels": channels,
+                "sample_rate": sample_rate,
+                "byte_rate": byte_rate,
+                "block_align": block_align,
+                "bits_per_sample": bits_per_sample,
+            }
+        elif chunk_id == b"data":
+            data_size = chunk_size
+
+        offset = chunk_end + (chunk_size & 1)
+
+    if fmt is None:
+        fail("TTS WAV has no fmt chunk")
+    if data_size is None:
+        fail("TTS WAV has no data chunk")
+
+    if fmt["format_tag"] not in (1, 3, 0xFFFE):
+        fail(f"Unsupported WAV format tag: {fmt['format_tag']}")
+
+    if fmt["channels"] < 1 or fmt["sample_rate"] < 8000:
+        fail(
+            "Invalid WAV stream parameters: "
+            f"channels={fmt['channels']} rate={fmt['sample_rate']}"
+        )
+
+    byte_rate = fmt["byte_rate"]
+    if byte_rate <= 0:
+        fail("Invalid WAV byte rate")
+
+    duration = data_size / float(byte_rate)
     if duration < 0.5:
         fail(f"TTS WAV duration too short: {duration:.2f}s")
+
+    format_names = {
+        1: "PCM",
+        3: "IEEE_FLOAT",
+        0xFFFE: "EXTENSIBLE",
+    }
+    fmt_name = format_names[fmt["format_tag"]]
+
+    print(
+        f"TTS_WAV_PASS bytes={file_size} "
+        f"format={fmt_name} tag={fmt['format_tag']} "
+        f"bits={fmt['bits_per_sample']} "
+        f"channels={fmt['channels']} "
+        f"rate={fmt['sample_rate']} "
+        f"duration={duration:.2f}s"
+    )
 
 
 def transcribe_wav(path: Path) -> str:
