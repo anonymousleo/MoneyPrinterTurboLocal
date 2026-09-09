@@ -6,6 +6,7 @@ Set-MptRuntimeEnvironment -RepoRoot $RepoRoot
 Set-Location $RepoRoot
 
 $Failures = New-Object System.Collections.Generic.List[string]
+$CudaHelper = Join-Path $PSScriptRoot "check_cuda_env.py"
 
 function Pass([string]$Message) {
     Write-Host "[PASS] $Message"
@@ -59,8 +60,7 @@ $ChatterDir = Join-Path $RepoRoot "local_apps\chatterbox-tts-api"
 $ChatterPython = Join-Path $ChatterDir ".venv\Scripts\python.exe"
 
 if (Test-Path $ChatterPython) {
-    $ChatterCheck = 'import torch; print(torch.__version__, torch.cuda.is_available()); raise SystemExit(0 if torch.cuda.is_available() else 1)'
-    & $ChatterPython -c $ChatterCheck
+    & $ChatterPython $CudaHelper --label CHATTERBOX
 
     if ($LASTEXITCODE -eq 0) {
         Pass "Chatterbox CUDA environment"
@@ -87,8 +87,9 @@ $CogPython = Join-Path $CogDir ".venv\Scripts\python.exe"
 $CogModel = $env:MPT_COGVIDEOX_MODEL_DIR
 
 if (Test-Path $CogPython) {
-    $CogCheck = 'import torch, diffusers, transformers, accelerate, torchao; print(torch.__version__, torch.cuda.is_available(), diffusers.__version__, transformers.__version__); raise SystemExit(0 if torch.cuda.is_available() else 1)'
-    & $CogPython -c $CogCheck
+    & $CogPython $CudaHelper `
+        --label COGVIDEOX `
+        --require diffusers transformers accelerate torchao
 
     if ($LASTEXITCODE -eq 0) {
         Pass "CogVideoX CUDA environment"

@@ -12,10 +12,14 @@ $UvExe = Join-Path $RepoRoot ".tools\uv\uv.exe"
 $RootPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $Manifest = Join-Path $RepoRoot "local_ai_manifest.json"
 $ProvenanceDir = Join-Path $RepoRoot ".runtime\provenance"
+$WhisperHelper = Join-Path $PSScriptRoot "download_whisper.py"
+$CudaHelper = Join-Path $PSScriptRoot "check_cuda_env.py"
 
 if (-not (Test-Path $UvExe)) { throw "Project-local uv missing. Run INSTALL.bat first." }
 if (-not (Test-Path $RootPython)) { throw "Project .venv missing. Run INSTALL.bat first." }
 if (-not (Test-Path $Manifest)) { throw "local_ai_manifest.json missing." }
+if (-not (Test-Path $WhisperHelper)) { throw "download_whisper.py missing." }
+if (-not (Test-Path $CudaHelper)) { throw "check_cuda_env.py missing." }
 
 New-Item -ItemType Directory -Force -Path $ProvenanceDir | Out-Null
 $cfg = Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
@@ -57,23 +61,28 @@ if (-not $ollamaReady) {
     }
 }
 
-& $ollama pull ([string]$cfg.qwen.model)
-if ($LASTEXITCODE -ne 0) { throw "Ollama pull failed." }
+& $ollama show ([string]$cfg.qwen.model) *> $null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[PASS] Qwen already present: $($cfg.qwen.model)"
+}
+else {
+    & $ollama pull ([string]$cfg.qwen.model)
+    if ($LASTEXITCODE -ne 0) { throw "Ollama pull failed." }
 
-& $ollama show ([string]$cfg.qwen.model) | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Ollama model verification failed." }
-Write-Host "[PASS] Qwen model available: $($cfg.qwen.model)"
+    & $ollama show ([string]$cfg.qwen.model) *> $null
+    if ($LASTEXITCODE -ne 0) { throw "Ollama model verification failed." }
+    Write-Host "[PASS] Qwen model downloaded: $($cfg.qwen.model)"
+}
 
 Write-Step "2. Faster-Whisper medium"
 $WhisperDir = Join-Path $RepoRoot ([string]$cfg.whisper.local_dir)
 New-Item -ItemType Directory -Force -Path $WhisperDir | Out-Null
 
-$env:MPT_WHISPER_REPO = [string]$cfg.whisper.repo
-$env:MPT_WHISPER_REV = [string]$cfg.whisper.revision
-$env:MPT_WHISPER_DIR = $WhisperDir
+& $RootPython $WhisperHelper `
+    --repo ([string]$cfg.whisper.repo) `
+    --revision ([string]$cfg.whisper.revision) `
+    --local-dir $WhisperDir
 
-$WhisperPython = 'import os; from pathlib import Path; from huggingface_hub import snapshot_download; repo=os.environ["MPT_WHISPER_REPO"]; rev=os.environ["MPT_WHISPER_REV"]; dest=Path(os.environ["MPT_WHISPER_DIR"]); snapshot_download(repo_id=repo, revision=rev, local_dir=str(dest)); req=["model.bin","config.json","tokenizer.json"]; missing=[x for x in req if not (dest/x).exists()]; print("WHISPER", dest, "missing", missing); raise SystemExit(1 if missing else 0)'
-& $RootPython -c $WhisperPython
 if ($LASTEXITCODE -ne 0) { throw "Whisper model setup failed." }
 Write-Host "[PASS] Faster-Whisper medium"
 
@@ -124,6 +133,7 @@ try {
         & $UvExe pip install --python $ChatterPython --reinstall `
             torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 `
             --index-url https://download.pytorch.org/whl/cu124
+
         if ($LASTEXITCODE -ne 0) {
             throw "Chatterbox CUDA Torch installation failed."
         }
@@ -139,8 +149,7 @@ try {
         )
         Set-Content -LiteralPath (Join-Path $ChatterDir ".env") -Value $EnvLines -Encoding ASCII
 
-        $ChatterCheck = 'import torch; print("CHATTERBOX TORCH", torch.__version__, "CUDA", torch.cuda.is_available()); raise SystemExit(0 if torch.cuda.is_available() else 1)'
-        & $ChatterPython -c $ChatterCheck
+        & $ChatterPython $CudaHelper --label CHATTERBOX
         if ($LASTEXITCODE -ne 0) {
             throw "Chatterbox CUDA verification failed."
         }
@@ -209,8 +218,10 @@ if ($Profile -eq "Full") {
         throw "CogVideoX model download failed."
     }
 
-    $CogCheck = 'import torch, diffusers, transformers, accelerate, torchao; print("COGVIDEOX ENV", torch.__version__, torch.cuda.is_available(), diffusers.__version__, transformers.__version__); raise SystemExit(0 if torch.cuda.is_available() else 1)'
-    & $CogPython -c $CogCheck
+    & $CogPython $CudaHelper `
+        --label COGVIDEOX `
+        --require diffusers transformers accelerate torchao
+
     if ($LASTEXITCODE -ne 0) {
         throw "CogVideoX environment verification failed."
     }
