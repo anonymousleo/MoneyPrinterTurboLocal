@@ -62,3 +62,7 @@ cogvideox_test/
 local_apps/chatterbox-tts-api/.env
 local_apps/chatterbox-tts-api/models/
 build_reports/
+
+# LocalAI deployment runtime
+.tools/
+.runtime/
