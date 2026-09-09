@@ -98,3 +98,9 @@ function Write-Step {
     Write-Host $Text
     Write-Host ("=" * 72)
 }
+
+# MoneyPrinterTurbo-LocalAI Windows UTF-8 subprocess contract
+# Prevent redirected Python stdout/stderr from falling back to Windows ANSI
+# encodings (for example cp1252), which can crash on Unicode status symbols.
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"

@@ -127,6 +127,8 @@ def main() -> None:
             env = os.environ.copy()
             env["NO_PROXY"] = "127.0.0.1,localhost"
             env["no_proxy"] = "127.0.0.1,localhost"
+            env["PYTHONUTF8"] = "1"
+            env["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.Popen(
                 [
                     str(CHATTER_PY),
