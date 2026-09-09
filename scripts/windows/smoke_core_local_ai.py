@@ -39,8 +39,17 @@ def wait_for_health(session: requests.Session, timeout_s: int = 600) -> dict:
             if r.ok:
                 payload = r.json()
                 print("CHATTERBOX_HEALTH", json.dumps(payload, ensure_ascii=False))
-                if payload.get("status") == "healthy":
+                status = payload.get("status")
+                if status == "healthy":
                     return payload
+                if status == "error":
+                    fail(
+                        "Chatterbox initialization failed: "
+                        f"{payload.get('initialization_error')!r}; "
+                        f"log={CHATTER_LOG}"
+                    )
+        except SystemExit:
+            raise
         except Exception as exc:
             last_error = exc
         time.sleep(2)

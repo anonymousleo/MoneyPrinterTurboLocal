@@ -69,6 +69,15 @@ if (Test-Path $ChatterPython) {
         Fail "Chatterbox CUDA environment"
     }
 
+    $PerthCheck = Join-Path $PSScriptRoot "check_chatterbox_runtime.py"
+    & $ChatterPython $PerthCheck
+    if ($LASTEXITCODE -eq 0) {
+        Pass "Chatterbox Perth watermarker runtime"
+    }
+    else {
+        Fail "Chatterbox Perth watermarker runtime"
+    }
+
     $RevisionFile = Join-Path $ChatterDir ".source-revision"
     if (Test-Path $RevisionFile) {
         $rev = (Get-Content -LiteralPath $RevisionFile -Raw).Trim()

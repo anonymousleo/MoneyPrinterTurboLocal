@@ -138,6 +138,17 @@ try {
             throw "Chatterbox CUDA Torch installation failed."
         }
 
+        & $UvExe pip install --python $ChatterPython "setuptools<81"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chatterbox setuptools compatibility installation failed."
+        }
+
+        $PerthCheck = Join-Path $PSScriptRoot "check_chatterbox_runtime.py"
+        & $ChatterPython $PerthCheck
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chatterbox Perth runtime verification failed."
+        }
+
         $EnvLines = @(
             "DEVICE=cuda",
             "PORT=4123",
