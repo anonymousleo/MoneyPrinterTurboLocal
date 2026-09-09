@@ -70,6 +70,27 @@ class MaterialInfo:
     source_info: Optional[dict[str, Any]] = None
 
 
+
+# LocalAI schema dependencies transplanted from the validated working build.
+SubtitleDisplayMode = Literal["sentence", "word_by_word"]
+
+SubtitleAnimation = Literal["none", "pop_spring"]
+
+_SUBTITLE_DISPLAY_MODES = ("sentence", "word_by_word")
+
+_SUBTITLE_ANIMATIONS = ("none", "pop_spring")
+
+def _get_valid_ui_choice(key: str, allowed_values: tuple[str, ...], default: str) -> str:
+    """
+    读取经过校验的 WebUI 枚举配置，兼容旧用户可能残留的无效值。
+
+    请求体由 Pydantic 的 Literal 严格校验，拼写错误会返回明确的字段校验错误；
+    配置文件则需要宽容处理，避免用户升级后因为历史手工配置错误导致整个服务
+    无法启动。HTTP 状态码由应用统一的校验异常处理器决定，这里不绑定具体数值。
+    """
+    configured_value = config.ui.get(key, default)
+    return configured_value if configured_value in allowed_values else default
+
 class VideoParams(BaseModel):
     """
     {
@@ -135,6 +156,14 @@ class VideoParams(BaseModel):
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
+
+    # LocalAI WebUI compatibility fields from validated working build.
+    subtitle_animation: SubtitleAnimation = _get_valid_ui_choice(
+        "subtitle_animation", _SUBTITLE_ANIMATIONS, "none"
+    )
+    subtitle_display_mode: SubtitleDisplayMode = _get_valid_ui_choice(
+        "subtitle_display_mode", _SUBTITLE_DISPLAY_MODES, "sentence"
+    )
 
 
 class SubtitleRequest(BaseModel):

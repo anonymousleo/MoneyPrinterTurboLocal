@@ -48,7 +48,7 @@ config.toml
 .env
 .env.*
 !.env.example
-models/
+/models/
 storage/
 **/.venv/
 **/__pycache__/
