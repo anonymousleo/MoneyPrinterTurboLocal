@@ -81,10 +81,16 @@ if (Test-Path $ChatterPython) {
     $RevisionFile = Join-Path $ChatterDir ".source-revision"
     if (Test-Path $RevisionFile) {
         $rev = (Get-Content -LiteralPath $RevisionFile -Raw).Trim()
-        Pass "Chatterbox source revision recorded: $rev"
+        $expectedRev = [string]$cfg.chatterbox_api.revision
+        if ($rev -eq $expectedRev) {
+            Pass "Chatterbox pinned source revision: $rev"
+        }
+        else {
+            Fail "Chatterbox revision mismatch: installed=$rev expected=$expectedRev"
+        }
     }
     else {
-        Warn "Chatterbox source revision file missing"
+        Fail "Chatterbox source revision file missing"
     }
 }
 else {

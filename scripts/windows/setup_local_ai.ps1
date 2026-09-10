@@ -42,6 +42,62 @@ function Wait-Http {
     return $false
 }
 
+$SkipCoreSetup = $false
+
+if ($Profile -eq "Full") {
+    Write-Step "Core reuse preflight"
+
+    $CoreOllama = Find-Executable "ollama.exe"
+    $CoreQwenReady = $false
+    if ($CoreOllama) {
+        & $CoreOllama show ([string]$cfg.qwen.model) *> $null
+        $CoreQwenReady = ($LASTEXITCODE -eq 0)
+    }
+
+    $CoreWhisperDir = Join-Path $RepoRoot ([string]$cfg.whisper.local_dir)
+    $CoreWhisperRequired = @("model.bin", "config.json", "tokenizer.json")
+    $CoreWhisperMissing = @(
+        $CoreWhisperRequired | Where-Object {
+            -not (Test-Path (Join-Path $CoreWhisperDir $_))
+        }
+    )
+    $CoreWhisperReady = ($CoreWhisperMissing.Count -eq 0)
+
+    $CoreChatterDir = Join-Path $RepoRoot "local_apps\chatterbox-tts-api"
+    $CoreChatterPython = Join-Path $CoreChatterDir ".venv\Scripts\python.exe"
+    $CoreRevisionFile = Join-Path $CoreChatterDir ".source-revision"
+    $CoreChatterReady = $false
+
+    if ((Test-Path $CoreChatterPython) -and (Test-Path $CoreRevisionFile)) {
+        $CoreInstalledRev = (Get-Content -LiteralPath $CoreRevisionFile -Raw).Trim()
+        $CoreExpectedRev = [string]$cfg.chatterbox_api.revision
+
+        if ($CoreInstalledRev -eq $CoreExpectedRev) {
+            & $CoreChatterPython $CudaHelper --label CHATTERBOX
+            $CoreCudaReady = ($LASTEXITCODE -eq 0)
+
+            $CorePerthCheck = Join-Path $PSScriptRoot "check_chatterbox_runtime.py"
+            & $CoreChatterPython $CorePerthCheck
+            $CorePerthReady = ($LASTEXITCODE -eq 0)
+
+            $CoreChatterReady = ($CoreCudaReady -and $CorePerthReady)
+        }
+    }
+
+    if ($CoreQwenReady -and $CoreWhisperReady -and $CoreChatterReady) {
+        $SkipCoreSetup = $true
+        Write-Host "[PASS] Verified Core payload already installed; reusing it."
+        Write-Host "[PASS] Qwen: $($cfg.qwen.model)"
+        Write-Host "[PASS] Whisper: $CoreWhisperDir"
+        Write-Host "[PASS] Chatterbox revision: $($cfg.chatterbox_api.revision)"
+    }
+    else {
+        Write-Host "[INFO] Core payload incomplete or mismatched; Core setup will run first."
+    }
+}
+
+if (-not $SkipCoreSetup) {
+
 Write-Step "1. Ollama / Qwen3:8B"
 $ollama = Find-Executable "ollama.exe"
 if (-not $ollama) { throw "Ollama not found. Run INSTALL.bat first." }
@@ -92,14 +148,9 @@ $ChatterTmp = Join-Path $env:TEMP ("mpt-chatterbox-" + [guid]::NewGuid().ToStrin
 New-Item -ItemType Directory -Force -Path $ChatterTmp | Out-Null
 
 try {
-    $commitInfo = Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/travisvn/chatterbox-tts-api/commits/main" `
-        -Headers @{ "User-Agent" = "MoneyPrinterTurbo-LocalAI" } `
-        -TimeoutSec 60
-
-    $sha = [string]$commitInfo.sha
+    $sha = [string]$cfg.chatterbox_api.revision
     if ([string]::IsNullOrWhiteSpace($sha)) {
-        throw "Could not resolve Chatterbox source revision."
+        throw "Pinned Chatterbox source revision missing from local_ai_manifest.json."
     }
 
     $zip = Join-Path $ChatterTmp "source.zip"
@@ -184,6 +235,8 @@ finally {
     if (Test-Path $ChatterTmp) {
         Remove-Item -LiteralPath $ChatterTmp -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
 }
 
 if ($Profile -eq "Full") {

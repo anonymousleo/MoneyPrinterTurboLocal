@@ -13,9 +13,12 @@
   },
   "chatterbox_api": {
     "repo": "travisvn/chatterbox-tts-api",
-    "revision_policy": "resolve-main-at-install-and-record-sha",
     "license": "AGPL-3.0",
-    "runtime_dir": "local_apps/chatterbox-tts-api"
+    "runtime_dir": "local_apps/chatterbox-tts-api",
+    "revision": "a5f466128e4baa8e4cceb3bba9b7ca9de6f7ec6b",
+    "chatterbox_tts_repo": "travisvn/chatterbox-multilingual",
+    "chatterbox_tts_revision": "c33cc0286ad166f14dd143c02c2a1c3309ab4727",
+    "setuptools_constraint": "<81"
   },
   "cogvideox": {
     "repo": "zai-org/CogVideoX1.5-5B",
