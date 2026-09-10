@@ -308,9 +308,21 @@ else {
 }
 
 Write-Step "Local AI setup complete"
+
+# Derive summary paths here because Full profile may reuse Core and skip
+# the block that normally initializes $WhisperDir and $ChatterDir.
+$SummaryWhisperDir = Join-Path $RepoRoot ([string]$cfg.whisper.local_dir)
+$SummaryChatterDir = Join-Path $RepoRoot ([string]$cfg.chatterbox_api.runtime_dir)
+$SummaryCogDir = $env:MPT_COGVIDEOX_MODEL_DIR
+
 Write-Host "Profile       : $Profile"
 Write-Host "Models root   : $env:MPT_LOCAL_MODELS_DIR"
 Write-Host "Qwen          : $($cfg.qwen.model)"
-Write-Host "Whisper       : $WhisperDir"
-Write-Host "Chatterbox    : $ChatterDir"
+Write-Host "Whisper       : $SummaryWhisperDir"
+Write-Host "Chatterbox    : $SummaryChatterDir"
+
+if ($Profile -eq "Full") {
+    Write-Host "CogVideoX     : $SummaryCogDir"
+}
+
 Write-Host "Run VERIFY_LOCAL_AI.bat next."
