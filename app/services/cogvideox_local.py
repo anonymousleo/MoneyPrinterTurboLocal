@@ -163,7 +163,7 @@ def generate_videos(
         raise CogVideoXLocalError("No scene prompts were supplied")
 
     fps = int(_cfg("cogvideox_fps", 8))
-    frames = int(_cfg("cogvideox_num_frames", 49))
+    frames = int(_cfg("cogvideox_num_frames", 33))
     frames = max(17, min(frames, 161))
     frames = ((frames - 1) // 16) * 16 + 1
     generated_seconds = max((frames - 1) / max(fps, 1), 1.0)

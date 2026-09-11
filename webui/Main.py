@@ -5132,8 +5132,8 @@ def _render_video_settings(panel, params):
                         "CogVideoX Frames",
                         options=[33, 49, 81],
                         index=[33, 49, 81].index(
-                            int(config.app.get("cogvideox_num_frames", 49))
-                            if int(config.app.get("cogvideox_num_frames", 49)) in [33, 49, 81]
+                            int(config.app.get("cogvideox_num_frames", 33))
+                            if int(config.app.get("cogvideox_num_frames", 33)) in [33, 49, 81]
                             else 49
                         ),
                         key="cogvideox_frames_select",
@@ -5162,7 +5162,7 @@ def _render_video_settings(panel, params):
                     _set_runtime_config("app", "cogvideox_seed", int(cog_seed))
                 cog_fallback = st.toggle(
                     "Fallback to DreamShaper if CogVideoX fails",
-                    value=bool(config.app.get("cogvideox_fallback_openai_image", True)),
+                    value=bool(config.app.get("cogvideox_fallback_openai_image", False)),
                     key="cogvideox_fallback_toggle",
                 )
                 _set_runtime_config(

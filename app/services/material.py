@@ -1711,7 +1711,7 @@ def download_videos(
                 return generated
         except Exception as exc:
             logger.exception(f"CogVideoX Local generation failed: {exc}")
-        if bool(config.app.get("cogvideox_fallback_openai_image", True)):
+        if bool(config.app.get("cogvideox_fallback_openai_image", False)):
             logger.warning(
                 "CogVideoX Local failed; automatically falling back to "
                 "the configured OpenAI-compatible image provider"
