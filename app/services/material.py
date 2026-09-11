@@ -1705,6 +1705,7 @@ def download_videos(
                 video_aspect=video_aspect,
                 audio_duration=audio_duration,
                 max_clip_duration=max_clip_duration,
+                material_directory=material_directory,
             )
             if generated:
                 return generated
