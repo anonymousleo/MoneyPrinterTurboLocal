@@ -5082,7 +5082,7 @@ def _render_video_settings(panel, params):
                 "local": tr("Local file"),
             }
             saved_video_source_name = str(
-                config.app.get("video_source", "pexels") or "pexels"
+                config.app.get("video_source", "cogvideox_local") or "pexels"
             )
             params.video_source = grouped_selectbox(
                 tr("Video Source"),
