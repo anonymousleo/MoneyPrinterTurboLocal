@@ -217,7 +217,7 @@ def get_chatterbox_voices() -> list[str]:
         result.append(v if v.startswith("chatterbox:") else f"chatterbox:{v}")
     if not result:
         # keep the dropdown usable even before any voice is configured
-        result = ["chatterbox:default-Female"]
+        result = ["chatterbox:alloy"]
     return result
 
 

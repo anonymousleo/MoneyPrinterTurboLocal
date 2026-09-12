@@ -41,6 +41,7 @@ class TestConfigPersistence:
             "pexels",
             "pixabay",
             "coverr",
+            "cogvideox_local",
             "volcengine_seedance",
             "ofox",
             "metaso_minimax",

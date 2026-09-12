@@ -101,8 +101,8 @@ config_file = os.path.join(root_dir, "webui", ".streamlit", "webui.toml")
 # 项目真正支持的语言；自动识别结果只进入当前会话，不修改全局配置。
 locales = utils.load_locales(i18n_dir)
 DEFAULT_CHATTERBOX_BASE_URL = "http://127.0.0.1:4123/v1"
-DEFAULT_CHATTERBOX_MODEL = "chatterbox"
-DEFAULT_CHATTERBOX_VOICES = ["default-Female"]
+DEFAULT_CHATTERBOX_MODEL = "chatterbox-tts-1"
+DEFAULT_CHATTERBOX_VOICES = ["alloy"]
 ONBOARDING_TOUR_KEY = "mpt-onboarding-v1"
 CUSTOM_LLM_ENDPOINT_ID = "custom"
 VOICE_MODE_TTS = "tts"
@@ -2950,7 +2950,7 @@ def _apply_fully_local_preset(
 
     _set_runtime_config("ui", "voice_mode", VOICE_MODE_TTS)
     _set_runtime_config("ui", "tts_server", "chatterbox")
-    _set_runtime_config("ui", "voice_name", "chatterbox:default-Female")
+    _set_runtime_config("ui", "voice_name", "chatterbox:alloy")
     _set_runtime_config("ui", "bgm_type", "random")
 
     # Local-only preset must not silently publish generated media or route audio
@@ -3342,7 +3342,7 @@ def _render_local_models_settings(panel):
                 _set_runtime_config("chatterbox", "api_key", "")
                 _set_runtime_config("ui", "voice_mode", VOICE_MODE_TTS)
                 _set_runtime_config("ui", "tts_server", "chatterbox")
-                _set_runtime_config("ui", "voice_name", "chatterbox:default-Female")
+                _set_runtime_config("ui", "voice_name", "chatterbox:alloy")
                 _save_runtime_config()
                 st.success(tr("Chatterbox TTS Activated"))
 
@@ -5902,7 +5902,7 @@ def _get_reusable_full_voice_preview(params, voice_mode: str) -> dict | None:
         return None
 
     script_content = str(params.video_script or "").strip()
-    selected_tts_server = config.ui.get("tts_server", "azure-tts-v1")
+    selected_tts_server = config.ui.get("tts_server", "chatterbox")
     if (
         not script_content
         or not params.voice_name
@@ -6460,7 +6460,7 @@ def _render_audio_settings(panel, params):
 
             # 配音方式是音频设置的一级状态，负责明确区分自动配音、用户上传和无配音。
             # 旧配置没有 voice_mode 时，根据原 tts_server 的无配音哨兵保持兼容。
-            saved_tts_server = config.ui.get("tts_server", "azure-tts-v1")
+            saved_tts_server = config.ui.get("tts_server", "chatterbox")
             saved_voice_mode = config.ui.get("voice_mode")
             if saved_voice_mode not in {
                 VOICE_MODE_TTS,
@@ -6505,7 +6505,7 @@ def _render_audio_settings(panel, params):
 
             tts_server_values = [server_value for server_value, _ in tts_servers]
             if saved_tts_server not in tts_server_values:
-                saved_tts_server = "azure-tts-v1"
+                saved_tts_server = "chatterbox"
 
             if tts_mode_enabled:
                 selected_tts_server = stable_selectbox(

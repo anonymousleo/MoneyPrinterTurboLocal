@@ -125,21 +125,36 @@ if (Test-Path $CogPython) {
         $workerText = Get-Content -LiteralPath $worker -Raw
         $markers = @(
             "CPU_T5_PRECOMPUTE_START",
-            "prompt_embeds",
+            "prompt_embeds=prompt_embeds",
+            "negative_prompt_embeds=negative_prompt_embeds",
             "enable_sequential_cpu_offload"
+        )
+        $forbiddenMarkers = @(
+            "prompt_embeds_cuda"
         )
         $MissingMarkers = @(
             $markers | Where-Object { -not $workerText.Contains($_) }
         )
+        $ForbiddenMarkersFound = @(
+            $forbiddenMarkers | Where-Object { $workerText.Contains($_) }
+        )
 
-        if ($MissingMarkers.Count -eq 0) {
-            Pass "CogVideoX 8 GB CPU-T5/sequential-offload markers"
+        if (($MissingMarkers.Count -eq 0) -and ($ForbiddenMarkersFound.Count -eq 0)) {
+            Pass "CogVideoX 8 GB CPU-T5/CPU-embeddings/sequential-offload contract"
         }
         else {
-            Fail (
-                "CogVideoX low-VRAM worker markers missing: " +
-                ($MissingMarkers -join ", ")
-            )
+            if ($MissingMarkers.Count -gt 0) {
+                Fail (
+                    "CogVideoX low-VRAM worker markers missing: " +
+                    ($MissingMarkers -join ", ")
+                )
+            }
+            if ($ForbiddenMarkersFound.Count -gt 0) {
+                Fail (
+                    "CogVideoX low-VRAM forbidden markers found: " +
+                    ($ForbiddenMarkersFound -join ", ")
+                )
+            }
         }
     }
 }

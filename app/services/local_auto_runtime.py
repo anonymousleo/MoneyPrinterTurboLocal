@@ -384,10 +384,10 @@ def apply_verified_local_preset() -> None:
     config.chatterbox["base_url"] = CHATTERBOX_OPENAI_URL
     config.chatterbox["api_key"] = ""
     config.chatterbox["model_id"] = "chatterbox-tts-1"
-    config.chatterbox["voices"] = ["alloy-Female"]
+    config.chatterbox["voices"] = ["alloy"]
     config.ui["voice_mode"] = "tts"
     config.ui["tts_server"] = "chatterbox"
-    config.ui["voice_name"] = "chatterbox:alloy-Female"
+    config.ui["voice_name"] = "chatterbox:alloy"
     config.whisper["model_size"] = "medium"
     config.whisper["device"] = "cpu"
     config.whisper["compute_type"] = "int8"

@@ -237,7 +237,13 @@ def generate_videos(
 
     log_file.write_text(result.stdout or "", encoding="utf-8")
     if result.returncode != 0:
-        tail = "\n".join((result.stdout or "").splitlines()[-30:])
+        output_text = result.stdout or ""
+        tail = "\n".join(output_text.splitlines()[-30:])
+        output_lower = output_text.lower()
+        if "cuda" in output_lower and "out of memory" in output_lower:
+            raise CogVideoXLocalError(
+                f"CogVideoX CUDA out of memory. Log: {log_file}\nLast output:\n{tail}"
+            )
         raise CogVideoXLocalError(
             f"CogVideoX worker failed. Log: {log_file}\nLast output:\n{tail}"
         )

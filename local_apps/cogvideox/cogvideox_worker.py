@@ -132,19 +132,11 @@ def generate_one(
 
     generator = torch.Generator(device="cpu").manual_seed(seed)
 
-    prompt_embeds_cuda = prompt_embeds.to(
-        device="cuda", dtype=torch.bfloat16
-    )
-    negative_prompt_embeds_cuda = (
-        negative_prompt_embeds.to(device="cuda", dtype=torch.bfloat16)
-        if negative_prompt_embeds is not None
-        else None
-    )
-
+    # Keep precomputed embeddings on CPU; sequential offload moves inputs as needed.
     result = pipe(
         prompt=None,
-        prompt_embeds=prompt_embeds_cuda,
-        negative_prompt_embeds=negative_prompt_embeds_cuda,
+        prompt_embeds=prompt_embeds,
+        negative_prompt_embeds=negative_prompt_embeds,
         num_videos_per_prompt=1,
         num_inference_steps=steps,
         num_frames=frames,
@@ -154,9 +146,6 @@ def generate_one(
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     export_to_video(result.frames[0], output, fps=fps)
 
-    del prompt_embeds_cuda
-    if negative_prompt_embeds_cuda is not None:
-        del negative_prompt_embeds_cuda
 
 
 def main() -> int:
@@ -247,7 +236,12 @@ def main() -> int:
                 guidance=guidance,
                 seed=seed + index - 1,
             )
-        except torch.cuda.OutOfMemoryError:
+        except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+            is_cuda_oom = isinstance(exc, torch.cuda.OutOfMemoryError) or (
+                "cuda" in str(exc).lower() and "out of memory" in str(exc).lower()
+            )
+            if not is_cuda_oom:
+                raise
             if not bool(req.get("oom_retry_shorter", True)) or current_frames <= 17:
                 raise
             retry_frames = 33 if current_frames > 33 else 17

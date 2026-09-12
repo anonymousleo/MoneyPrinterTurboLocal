@@ -12,19 +12,23 @@ from loguru import logger
 from app.config import config
 from app.utils import utils
 
-model_size = config.whisper.get("model_size", "large-v3")
-device = config.whisper.get("device", "cpu")
-compute_type = config.whisper.get("compute_type", "int8")
-initial_prompt = config.whisper.get("initial_prompt", "") or None
 model = None
+model_key = None
 
 
 def create(audio_file, subtitle_file: str = "", word_level: bool = False):
-    global model
+    global model, model_key
+
+    model_size = config.whisper.get("model_size", "medium")
+    device = config.whisper.get("device", "cpu")
+    compute_type = config.whisper.get("compute_type", "int8")
+    initial_prompt = config.whisper.get("initial_prompt", "") or None
+    desired_model_key = (model_size, device, compute_type)
+
     if WhisperModel is None:
         logger.warning("faster_whisper not available, skipping whisper subtitle generation")
         return ""
-    if not model:
+    if model is None or model_key != desired_model_key:
         model_path = f"{utils.root_dir()}/models/whisper-{model_size}"
         model_bin_file = f"{model_path}/model.bin"
         if not os.path.isdir(model_path) or not os.path.isfile(model_bin_file):
@@ -37,7 +41,10 @@ def create(audio_file, subtitle_file: str = "", word_level: bool = False):
             model = WhisperModel(
                 model_size_or_path=model_path, device=device, compute_type=compute_type
             )
+            model_key = desired_model_key
         except Exception as e:
+            model = None
+            model_key = None
             logger.error(
                 f"failed to load model: {e} \n\n"
                 f"********************************************\n"

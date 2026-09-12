@@ -1707,18 +1707,21 @@ def download_videos(
                 max_clip_duration=max_clip_duration,
                 material_directory=material_directory,
             )
-            if generated:
-                return generated
+            if not generated:
+                raise cogvideox_local.CogVideoXLocalError(
+                    "CogVideoX Local returned no generated clips"
+                )
+            return generated
         except Exception as exc:
             logger.exception(f"CogVideoX Local generation failed: {exc}")
-        if bool(config.app.get("cogvideox_fallback_openai_image", False)):
-            logger.warning(
-                "CogVideoX Local failed; automatically falling back to "
-                "the configured OpenAI-compatible image provider"
-            )
-            source = "openai_image"
-        else:
-            return []
+            if bool(config.app.get("cogvideox_fallback_openai_image", False)):
+                logger.warning(
+                    "CogVideoX Local failed; automatically falling back to "
+                    "the configured OpenAI-compatible image provider"
+                )
+                source = "openai_image"
+            else:
+                raise
     # <<< MPT COGVIDEOX LOCAL v0.3.0 <<<
 
     if source == "wavespeed":
