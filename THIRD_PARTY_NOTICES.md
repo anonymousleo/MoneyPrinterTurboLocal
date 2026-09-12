@@ -33,3 +33,20 @@ The release installer may download the following separate runtimes/models:
 
 Model weights and downloaded third-party runtime trees are not committed to
 MoneyPrinterTurbo-LocalAI.
+
+## Noto Sans SC
+
+This distribution includes Noto Sans SC font files from the
+`notofonts/noto-cjk` project, pinned to the Noto Sans CJK `Sans2.004`
+font release.
+
+Included files:
+- `resource/fonts/NotoSansSC-Regular.otf`
+- `resource/fonts/NotoSansSC-Bold.otf`
+
+The included font software is distributed under the SIL Open Font License 1.1.
+The license text is included at:
+
+`resource/fonts/NotoSansSC-OFL-1.1.txt`
+
+Upstream project: https://github.com/notofonts/noto-cjk

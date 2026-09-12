@@ -137,7 +137,7 @@ UPLOAD_POST_MANAGE_USERS_URL = "https://app.upload-post.com/manage-users"
 DEFAULT_VIDEO_CODEC_OPTION = "__default__"
 DEFAULT_SUBTITLE_SETTINGS = {
     "subtitle_enabled": True,
-    "font_name": "MicrosoftYaHeiBold.ttc",
+    "font_name": "NotoSansSC-Bold.otf",
     "subtitle_position": "bottom",
     "subtitle_display_mode": "sentence",
     "subtitle_animation": "none",

@@ -472,7 +472,7 @@ Batch manifests:
         help=(
             "subtitle font filename inside resource/fonts "
             "(default: [ui].font_name from config.toml; "
-            "STHeitiMedium.ttc when unset)"
+            "NotoSansSC-Bold.otf when unset)"
         ),
     )
     subtitle_group.add_argument(

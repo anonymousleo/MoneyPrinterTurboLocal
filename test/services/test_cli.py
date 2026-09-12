@@ -486,7 +486,7 @@ class TestCli(unittest.TestCase):
                 "--video-subject",
                 "test",
                 "--font-name",
-                "MicrosoftYaHeiBold.ttc",
+                "NotoSansSC-Bold.otf",
                 "--subtitle-position",
                 "custom",
                 "--custom-position",
@@ -507,7 +507,7 @@ class TestCli(unittest.TestCase):
 
         params = cli.build_video_params(args)
 
-        self.assertEqual(params.font_name, "MicrosoftYaHeiBold.ttc")
+        self.assertEqual(params.font_name, "NotoSansSC-Bold.otf")
         self.assertEqual(params.subtitle_position, "custom")
         self.assertEqual(params.custom_position, 42.5)
         self.assertEqual(params.text_fore_color, "#AABBCC")
@@ -1500,7 +1500,7 @@ class TestCliUiDefaults(unittest.TestCase):
     """
 
     UI_CONFIG = {
-        "font_name": "MicrosoftYaHeiBold.ttc",
+        "font_name": "NotoSansSC-Bold.otf",
         "text_fore_color": "#123456",
         "font_size": 48,
         "subtitle_background_enabled": True,
@@ -1515,7 +1515,7 @@ class TestCliUiDefaults(unittest.TestCase):
         with patch.dict(app_config.ui, self.UI_CONFIG, clear=True):
             params = cli.build_video_params(args)
 
-        self.assertEqual(params.font_name, "MicrosoftYaHeiBold.ttc")
+        self.assertEqual(params.font_name, "NotoSansSC-Bold.otf")
         self.assertEqual(params.text_fore_color, "#123456")
         self.assertEqual(params.font_size, 48)
         self.assertEqual(params.text_background_color, "#654321")
@@ -1535,7 +1535,7 @@ class TestCliUiDefaults(unittest.TestCase):
                 "--video-subject",
                 "test",
                 "--font-name",
-                "STHeitiLight.ttc",
+                "NotoSansSC-Regular.otf",
                 "--text-fore-color",
                 "#AABBCC",
                 "--font-size",
@@ -1549,7 +1549,7 @@ class TestCliUiDefaults(unittest.TestCase):
         with patch.dict(app_config.ui, self.UI_CONFIG, clear=True):
             params = cli.build_video_params(args)
 
-        self.assertEqual(params.font_name, "STHeitiLight.ttc")
+        self.assertEqual(params.font_name, "NotoSansSC-Regular.otf")
         self.assertEqual(params.text_fore_color, "#AABBCC")
         self.assertEqual(params.font_size, 72)
         self.assertEqual(params.voice_name, "no-voice")
@@ -1561,7 +1561,7 @@ class TestCliUiDefaults(unittest.TestCase):
         with patch.dict(app_config.ui, {}, clear=True):
             params = cli.build_video_params(args)
 
-        self.assertEqual(params.font_name, "STHeitiMedium.ttc")
+        self.assertEqual(params.font_name, "NotoSansSC-Bold.otf")
         self.assertEqual(params.text_fore_color, "#FFFFFF")
         self.assertEqual(params.font_size, 60)
         self.assertFalse(params.text_background_color)
@@ -1600,7 +1600,7 @@ class TestCliUiDefaults(unittest.TestCase):
 
         self.assertEqual(params.font_size, 60)
         self.assertEqual(params.text_fore_color, "#FFFFFF")
-        self.assertEqual(params.font_name, "STHeitiMedium.ttc")
+        self.assertEqual(params.font_name, "NotoSansSC-Bold.otf")
         self.assertEqual(params.voice_name, "zh-CN-XiaoxiaoNeural-Female")
 
     def test_saved_no_voice_mode_disables_tts(self):

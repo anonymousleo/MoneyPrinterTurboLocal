@@ -997,7 +997,7 @@ class TestVideoService(unittest.TestCase):
     def test_wrap_text(self):
         """test text wrapping function"""
         try:
-            font_path = os.path.join(utils.font_dir(), "STHeitiMedium.ttc")
+            font_path = os.path.join(utils.font_dir(), "NotoSansSC-Bold.otf")
             if not os.path.exists(font_path):
                 self.fail(f"font file not found: {font_path}")
                 
@@ -1075,7 +1075,7 @@ class TestVideoService(unittest.TestCase):
         按最终两行计算。否则宽画面上的短句会绕过自动换行分支并再次裁掉末行。
         """
         font_size = 60
-        font_path = os.path.join(utils.font_dir(), "MicrosoftYaHeiBold.ttc")
+        font_path = os.path.join(utils.font_dir(), "NotoSansSC-Bold.otf")
         text = "SAFE TEXT\nMORE SAFE"
         font = vd.ImageFont.truetype(font_path, font_size)
 
@@ -1174,22 +1174,22 @@ class TestVideoService(unittest.TestCase):
             ),
             (
                 "simplified_chinese",
-                "MicrosoftYaHeiBold.ttc",
+                "NotoSansSC-Bold.otf",
                 "这是一个用于检查字幕最后一行是否完整显示的测试句子",
             ),
             (
                 "traditional_chinese",
-                "STHeitiMedium.ttc",
+                "NotoSansSC-Bold.otf",
                 "這是一個用於檢查字幕最後一行是否完整顯示的測試句子",
             ),
             (
                 "cyrillic",
-                "MicrosoftYaHeiNormal.ttc",
+                "NotoSansSC-Regular.otf",
                 "Это текст для проверки последней строки субтитров",
             ),
             (
                 "greek",
-                "STHeitiLight.ttc",
+                "NotoSansSC-Regular.otf",
                 "Αυτό είναι κείμενο για τον έλεγχο της τελευταίας γραμμής",
             ),
         )

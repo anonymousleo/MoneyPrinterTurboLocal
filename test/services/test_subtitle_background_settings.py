@@ -132,7 +132,7 @@ class TestSubtitleBackgroundSettings(unittest.TestCase):
         )
         self.assertTrue(
             video.subtitle_font_supports_text(
-                str(fonts_dir / "MicrosoftYaHeiBold.ttc"), "人工智能改变生活"
+                str(fonts_dir / "NotoSansSC-Bold.otf"), "人工智能改变生活"
             )
         )
         self.assertTrue(
@@ -150,7 +150,7 @@ class TestSubtitleBackgroundSettings(unittest.TestCase):
             Path(__file__).parent.parent.parent
             / "resource"
             / "fonts"
-            / "MicrosoftYaHeiBold.ttc"
+            / "NotoSansSC-Bold.otf"
         )
 
         wrapped_text, _ = video.wrap_text(
