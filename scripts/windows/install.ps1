@@ -1,6 +1,8 @@
 param(
     [switch]$SkipOllama,
-    [switch]$SkipFFmpeg
+    [switch]$SkipFFmpeg,
+    [ValidateSet("Prompt","Core","Full","Base")]
+    [string]$LocalAIProfile = "Prompt"
 )
 
 . (Join-Path $PSScriptRoot "common.ps1")
@@ -13,6 +15,48 @@ Write-Step "MoneyPrinterTurbo-LocalAI Windows Installer"
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw "This installer currently supports Windows only."
 }
+
+$ResolvedLocalAIProfile = $LocalAIProfile
+if ($ResolvedLocalAIProfile -eq "Prompt") {
+    Write-Step "Choose local AI installation profile"
+    Write-Host "[1] Core Local"
+    Write-Host "    Qwen3:8B + Faster-Whisper medium + Chatterbox TTS"
+    Write-Host ""
+    Write-Host "[2] Full Local Video"
+    Write-Host "    Core Local + CogVideoX1.5-5B (~31 GB model download)"
+    Write-Host "    Recommended for NVIDIA GPUs with at least 8 GB VRAM."
+    Write-Host ""
+    Write-Host "[3] Base environment only"
+    Write-Host "    Install the application runtime now; local AI payloads can be added later."
+    Write-Host ""
+
+    while ($true) {
+        $choice = Read-Host "Select profile [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "1" }
+
+        switch ($choice.Trim().ToLowerInvariant()) {
+            { $_ -in @("1","core","c") } {
+                $ResolvedLocalAIProfile = "Core"
+                break
+            }
+            { $_ -in @("2","full","f") } {
+                $ResolvedLocalAIProfile = "Full"
+                break
+            }
+            { $_ -in @("3","base","b") } {
+                $ResolvedLocalAIProfile = "Base"
+                break
+            }
+            default {
+                Write-Host "Invalid choice. Enter 1, 2, or 3."
+                continue
+            }
+        }
+        break
+    }
+}
+
+Write-Host "Selected profile: $ResolvedLocalAIProfile"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot ".tools") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot ".runtime") | Out-Null
@@ -116,7 +160,7 @@ if (-not $SkipOllama) {
     }
 }
 
-Write-Step "6. Installation summary"
+Write-Step "6. Base environment summary"
 Write-Host "Repository     : $RepoRoot"
 Write-Host "Python         : $PythonExe"
 Write-Host "Models root    : $env:MPT_LOCAL_MODELS_DIR"
@@ -127,7 +171,46 @@ if ($env:HTTPS_PROXY) {
     Write-Host "Proxy detected : none"
 }
 
+Write-Step "7. Local AI profile setup"
+$ProfileMarker = Join-Path $RepoRoot ".runtime\local_ai_profile.txt"
+
+if ($ResolvedLocalAIProfile -eq "Base") {
+    Set-Content -LiteralPath $ProfileMarker -Value "Base" -Encoding ASCII
+    Write-Host "Base environment selected."
+    Write-Host "Local AI payload installation was intentionally skipped."
+    Write-Host "You can install them later with:"
+    Write-Host "  SETUP_LOCAL_AI.bat -Profile Core"
+    Write-Host "or:"
+    Write-Host "  SETUP_LOCAL_AI.bat -Profile Full"
+}
+else {
+    $SetupScript = Join-Path $PSScriptRoot "setup_local_ai.ps1"
+    if (-not (Test-Path $SetupScript)) {
+        throw "Local AI setup script missing: $SetupScript"
+    }
+
+    Write-Host "Installing local AI profile: $ResolvedLocalAIProfile"
+    & $SetupScript -Profile $ResolvedLocalAIProfile
+
+    if (-not (Test-Path $ProfileMarker)) {
+        throw "Local AI setup completed without creating the profile marker."
+    }
+
+    $RecordedProfile = (Get-Content -LiteralPath $ProfileMarker -Raw).Trim()
+    if ($RecordedProfile -ne $ResolvedLocalAIProfile) {
+        throw "Profile marker mismatch. Expected $ResolvedLocalAIProfile, found $RecordedProfile."
+    }
+}
+
+Write-Step "8. Installation complete"
+Write-Host "Selected profile : $ResolvedLocalAIProfile"
+Write-Host "Repository       : $RepoRoot"
+Write-Host "Models root      : $env:MPT_LOCAL_MODELS_DIR"
 Write-Host ""
-Write-Host "Core Windows environment installation completed."
 Write-Host "Run VERIFY.bat next."
-Write-Host "Chatterbox and the optional CogVideoX model are installed in later setup stages."
+Write-Host "Then run START.bat to launch the WebUI."
+Write-Host ""
+Write-Host "For unattended installation:"
+Write-Host "  INSTALL.bat -LocalAIProfile Core"
+Write-Host "  INSTALL.bat -LocalAIProfile Full"
+Write-Host "  INSTALL.bat -LocalAIProfile Base"

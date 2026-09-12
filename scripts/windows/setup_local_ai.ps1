@@ -307,6 +307,10 @@ else {
     Write-Host "Run SETUP_LOCAL_AI.bat -Profile Full later for CogVideoX."
 }
 
+$ProfileMarker = Join-Path $RepoRoot ".runtime\local_ai_profile.txt"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ProfileMarker) | Out-Null
+Set-Content -LiteralPath $ProfileMarker -Value $Profile -Encoding ASCII
+
 Write-Step "Local AI setup complete"
 
 # Derive summary paths here because Full profile may reuse Core and skip
@@ -325,4 +329,4 @@ if ($Profile -eq "Full") {
     Write-Host "CogVideoX     : $SummaryCogDir"
 }
 
-Write-Host "Run VERIFY_LOCAL_AI.bat next."
+Write-Host "Run VERIFY.bat next."

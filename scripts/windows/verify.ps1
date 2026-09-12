@@ -77,6 +77,31 @@ Write-Host "CogVideoX path : $env:MPT_COGVIDEOX_MODEL_DIR"
 if ($env:HTTPS_PROXY) { Write-Host "Proxy          : $env:HTTPS_PROXY" }
 else { Write-Host "Proxy          : none" }
 
+$ProfileMarker = Join-Path $RepoRoot ".runtime\local_ai_profile.txt"
+if (Test-Path $ProfileMarker) {
+    $InstalledProfile = (Get-Content -LiteralPath $ProfileMarker -Raw).Trim()
+    if ($InstalledProfile -in @("Core","Full")) {
+        Write-Step "Local AI payload verification ($InstalledProfile)"
+        $LocalVerifier = Join-Path $PSScriptRoot "verify_local_ai.ps1"
+        if (-not (Test-Path $LocalVerifier)) {
+            Fail "verify_local_ai.ps1 is missing"
+        } else {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $LocalVerifier
+            if ($LASTEXITCODE -eq 0) {
+                Pass "Local AI payload verification ($InstalledProfile)"
+            } else {
+                Fail "Local AI payload verification ($InstalledProfile)"
+            }
+        }
+    } elseif ($InstalledProfile -eq "Base") {
+        Warn "Base-only profile installed; local AI payload verification skipped."
+    } else {
+        Warn "Unknown local AI profile marker: $InstalledProfile"
+    }
+} else {
+    Warn "No local AI profile marker found. Run INSTALL.bat or SETUP_LOCAL_AI.bat."
+}
+
 if ($Failures.Count -gt 0) {
     Write-Host ""
     Write-Host "VERIFICATION FAILED: $($Failures.Count) required check(s) failed."
